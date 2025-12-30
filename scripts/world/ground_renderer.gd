@@ -13,13 +13,15 @@ var brown_material: StandardMaterial3D = null
 
 # Track player for smooth following
 var miasma_manager: Node = null
+var world_manager: Node = null
 var _last_visible_bounds: Dictionary = {}
 
 func _ready():
 	await get_tree().process_frame
 	
-	# Get MiasmaManager to track player position
+	# Get managers
 	miasma_manager = get_node_or_null("/root/MiasmaManager")
+	world_manager = get_node_or_null("/root/WorldManager")
 	
 	# Create mesh instance
 	ground_mesh_instance = MeshInstance3D.new()
@@ -129,52 +131,66 @@ func _update_ground_tiles():
 	var min_tile_z = int(min_z / GROUND_TILE_SIZE)
 	var max_tile_z = int(max_z / GROUND_TILE_SIZE) + 1
 	
-	# Build mesh: tiles with borders (two surfaces: green centers, brown borders)
-	var green_vertices = PackedVector3Array()
-	var green_indices = PackedInt32Array()
+	# Build mesh: tiles with borders (multiple surfaces: biome-colored centers, brown borders)
+	# We'll use a single material per tile center (or group by color for efficiency)
+	var center_vertices = PackedVector3Array()
+	var center_indices = PackedInt32Array()
+	var center_colors = PackedColorArray()  # Per-vertex colors for centers
 	var brown_vertices = PackedVector3Array()
 	var brown_indices = PackedInt32Array()
 	var y_pos = -1.0  # Below miasma
-	var green_vertex_index = 0
+	var center_vertex_index = 0
 	var brown_vertex_index = 0
 	
-	# Build each tile: green center with brown border
+	# Build each tile: biome-colored center with brown border
 	for tile_x in range(min_tile_x, max_tile_x + 1):
 		for tile_z in range(min_tile_z, max_tile_z + 1):
 			# Calculate world position (snapped to grid)
 			var world_x = tile_x * GROUND_TILE_SIZE
 			var world_z = tile_z * GROUND_TILE_SIZE
+			var tile_world_pos = Vector3(world_x, 0, world_z)
+			
+			# Get biome color for this tile
+			var tile_color = Color(0.3, 0.8, 0.4)  # Default green fallback
+			if world_manager:
+				tile_color = world_manager.get_ground_color_at(tile_world_pos)
 			
 			# Position relative to player (for smooth following)
 			var local_x = world_x - player_ground.x
 			var local_z = world_z - player_ground.z
 			
-			# Create tile: green center with brown border
-			# Center (green) - slightly smaller to show border
+			# Create tile: biome-colored center with brown border
+			# Center (biome color) - slightly smaller to show border
 			var center_size = GROUND_TILE_SIZE - BORDER_WIDTH * 2
 			var half_center = center_size * 0.5
 			var half_tile = GROUND_TILE_SIZE * 0.5
 			
-			# Center quad vertices (green)
+			# Center quad vertices (biome color)
 			var v0 = Vector3(local_x - half_center, y_pos, local_z - half_center)
 			var v1 = Vector3(local_x + half_center, y_pos, local_z - half_center)
 			var v2 = Vector3(local_x + half_center, y_pos, local_z + half_center)
 			var v3 = Vector3(local_x - half_center, y_pos, local_z + half_center)
 			
-			var base = green_vertex_index
-			green_vertices.append(v0)
-			green_vertices.append(v1)
-			green_vertices.append(v2)
-			green_vertices.append(v3)
+			var base = center_vertex_index
+			center_vertices.append(v0)
+			center_vertices.append(v1)
+			center_vertices.append(v2)
+			center_vertices.append(v3)
 			
-			green_indices.append(base + 0)
-			green_indices.append(base + 1)
-			green_indices.append(base + 2)
-			green_indices.append(base + 0)
-			green_indices.append(base + 2)
-			green_indices.append(base + 3)
+			# Add color for each vertex (same color for all vertices of this tile)
+			center_colors.append(tile_color)
+			center_colors.append(tile_color)
+			center_colors.append(tile_color)
+			center_colors.append(tile_color)
 			
-			green_vertex_index += 4
+			center_indices.append(base + 0)
+			center_indices.append(base + 1)
+			center_indices.append(base + 2)
+			center_indices.append(base + 0)
+			center_indices.append(base + 2)
+			center_indices.append(base + 3)
+			
+			center_vertex_index += 4
 			
 			# Border (brown) - four edge quads
 			# Top border
@@ -260,14 +276,21 @@ func _update_ground_tiles():
 	# Create array mesh with two surfaces
 	var array_mesh = ArrayMesh.new()
 	
-	# Surface 0: Green centers
-	if green_vertices.size() > 0:
-		var green_arrays = []
-		green_arrays.resize(Mesh.ARRAY_MAX)
-		green_arrays[Mesh.ARRAY_VERTEX] = green_vertices
-		green_arrays[Mesh.ARRAY_INDEX] = green_indices
-		array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, green_arrays)
-		array_mesh.surface_set_material(0, green_material)
+	# Surface 0: Biome-colored centers (using vertex colors)
+	if center_vertices.size() > 0:
+		var center_arrays = []
+		center_arrays.resize(Mesh.ARRAY_MAX)
+		center_arrays[Mesh.ARRAY_VERTEX] = center_vertices
+		center_arrays[Mesh.ARRAY_INDEX] = center_indices
+		center_arrays[Mesh.ARRAY_COLOR] = center_colors
+		array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, center_arrays)
+		# Use a material that supports vertex colors
+		var center_material = StandardMaterial3D.new()
+		center_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		center_material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
+		center_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		center_material.vertex_color_use_as_albedo = true  # Use vertex colors
+		array_mesh.surface_set_material(0, center_material)
 	
 	# Surface 1: Brown borders
 	if brown_vertices.size() > 0:

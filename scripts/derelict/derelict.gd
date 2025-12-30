@@ -13,10 +13,19 @@ var world_position: Vector3 = Vector3.ZERO
 var trail: Node3D = null
 
 func _ready():
-	# Start at origin
-	world_position = Vector3.ZERO
-	global_position = Vector3.ZERO
-	print("Derelict initialized at world position: ", world_position)
+	# Get starting position from WorldManager (always in meadow)
+	var world_manager = get_node_or_null("/root/WorldManager")
+	if world_manager:
+		# Wait a frame for WorldManager to initialize
+		await get_tree().process_frame
+		world_position = world_manager.get_starting_position()
+		global_position = world_position
+		print("Derelict initialized at world position: ", world_position)
+	else:
+		# Fallback: start at origin
+		world_position = Vector3.ZERO
+		global_position = Vector3.ZERO
+		print("Derelict initialized at world position (fallback): ", world_position)
 	
 	# Find or create trail
 	trail = get_node_or_null("../PlayerTrail")
