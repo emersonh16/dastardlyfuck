@@ -15,6 +15,10 @@ var mode_order = [
 	BeamManager.BeamMode.LASER
 ]
 
+# Scroll sensitivity - require this many scroll events before changing mode
+const SCROLL_THRESHOLD: int = 3
+var scroll_accumulator: int = 0
+
 func _ready():
 	beam_manager = get_node_or_null("/root/BeamManager")
 	if not beam_manager:
@@ -27,14 +31,26 @@ func _input(event):
 	if not beam_manager:
 		return
 	
-	# Mouse wheel - cycle through modes
+	# Mouse wheel - cycle through modes (less sensitive)
 	# Note: Mouse wheel events use factor, not pressed
+	# Scroll DOWN goes toward LASER (forward), Scroll UP goes toward OFF (backward)
 	if event is InputEventMouseButton:
+		var scroll_direction: int = 0
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_cycle_mode(1)  # Forward
-			get_viewport().set_input_as_handled()
+			scroll_direction = -1  # Scroll UP = backward toward OFF
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_cycle_mode(-1)  # Backward
+			scroll_direction = 1  # Scroll DOWN = forward toward LASER
+		
+		if scroll_direction != 0:
+			# Accumulate scroll events
+			scroll_accumulator += scroll_direction
+			
+			# Only change mode when threshold is reached
+			if abs(scroll_accumulator) >= SCROLL_THRESHOLD:
+				var mode_change = 1 if scroll_accumulator > 0 else -1
+				_cycle_mode(mode_change)
+				scroll_accumulator = 0  # Reset accumulator
+			
 			get_viewport().set_input_as_handled()
 	
 	# Number keys - direct mode switching
@@ -65,11 +81,13 @@ func _cycle_mode(direction: int):
 	# Cycle to next/previous mode
 	var new_index = current_index + direction
 	
-	# Wrap around
+	# Lock at ends (no wrapping)
+	# direction > 0 (scroll down) locks at LASER (last index)
+	# direction < 0 (scroll up) locks at OFF (index 0)
 	if new_index < 0:
-		new_index = mode_order.size() - 1
+		new_index = 0  # Lock at OFF
 	elif new_index >= mode_order.size():
-		new_index = 0
+		new_index = mode_order.size() - 1  # Lock at LASER
 	
 	# Set new mode
 	var new_mode = mode_order[new_index]
