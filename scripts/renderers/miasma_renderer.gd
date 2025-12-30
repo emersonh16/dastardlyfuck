@@ -9,6 +9,8 @@ var material: StandardMaterial3D
 
 # Track visible bounds to only rebuild when needed
 var _last_visible_bounds: Dictionary = {}
+var _last_wind_offset: Vector2 = Vector2.ZERO
+var wind_manager: Node = null
 
 func _ready():
 	await get_tree().process_frame
@@ -18,6 +20,11 @@ func _ready():
 	if not miasma_manager:
 		push_warning("MiasmaManager autoload not found!")
 		return
+	
+	# Find WindManager to track wind changes
+	wind_manager = get_node_or_null("/root/WindManager")
+	if wind_manager:
+		wind_manager.wind_changed.connect(_on_wind_changed)
 	
 	# Create mesh instance
 	mesh_instance = MeshInstance3D.new()
@@ -49,6 +56,10 @@ func _ready():
 
 func _on_cleared_changed():
 	# Trigger immediate update when miasma changes
+	_do_render_update()
+
+func _on_wind_changed(_velocity: Vector2):
+	# Wind changed - need to rebuild mesh to show advection
 	_do_render_update()
 
 func _process(_delta):
@@ -135,14 +146,20 @@ func _do_render_update():
 		min_z -= padding
 		max_z += padding
 	
-	# Check if bounds changed (only rebuild if needed)
+	# Check if bounds changed OR wind offset changed (wind moves miasma)
 	var current_bounds = {"min_x": min_x, "max_x": max_x, "min_z": min_z, "max_z": max_z}
-	if current_bounds.hash() == _last_visible_bounds.hash():
+	var current_wind_offset = Vector2(miasma_manager.wind_offset_x, miasma_manager.wind_offset_z)
+	
+	var bounds_changed = current_bounds.hash() != _last_visible_bounds.hash()
+	var wind_changed = current_wind_offset.distance_to(_last_wind_offset) > 0.1  # Rebuild if wind moved > 0.1 tiles
+	
+	if not bounds_changed and not wind_changed:
 		# Just update position, don't rebuild mesh
 		global_position = player_ground
 		return
 	
 	_last_visible_bounds = current_bounds
+	_last_wind_offset = current_wind_offset
 	
 	# Calculate tile bounds
 	var min_tile_x = int(min_x / tile_size)
