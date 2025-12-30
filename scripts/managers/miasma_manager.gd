@@ -20,7 +20,7 @@ var cleared_tiles: Dictionary = {}  # Vector3i -> true (cleared)
 # Viewport + buffer size (in tiles)
 var viewport_tiles_x: int = 0
 var viewport_tiles_z: int = 0
-var buffer_tiles: int = 32  # Buffer around viewport
+var buffer_tiles: int = 8  # Buffer around viewport (reduced for performance)
 
 # Player position (world space) - miasma moves with player
 var player_position: Vector3 = Vector3.ZERO
@@ -37,8 +37,16 @@ func _initialize_default():
 	# Default initialization for testing
 	var viewport = get_viewport()
 	if viewport:
-		var size = viewport.get_visible_rect().size
-		initialize_miasma(Vector3.ZERO, size.x, size.y)
+		# Use camera's orthographic size for world units, not pixel size
+		var camera = viewport.get_camera_3d()
+		var world_width = 200.0  # Default camera size
+		var world_height = 200.0
+		if camera and camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
+			world_width = camera.size
+			var pixel_size = viewport.get_visible_rect().size
+			world_height = camera.size * (pixel_size.y / pixel_size.x)
+		# Pass world units - initialize_miasma will add buffer automatically
+		initialize_miasma(Vector3.ZERO, world_width, world_height)
 
 # Initialize miasma around player position
 func initialize_miasma(player_pos: Vector3, viewport_width: float, viewport_height: float):
