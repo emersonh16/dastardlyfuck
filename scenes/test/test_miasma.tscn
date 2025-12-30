@@ -1,0 +1,38 @@
+[gd_scene load_steps=7 format=3 uid="uid://dt842yhadvp80"]
+
+[ext_resource type="Script" path="res://scripts/camera/camera_follower.gd" id="1_camera"]
+[ext_resource type="Script" uid="uid://b6b412ej2ghav" path="res://scripts/miasma/miasma_renderer.gd" id="2_renderer"]
+[ext_resource type="Script" path="res://scripts/ui/fps_display.gd" id="3_fps"]
+[ext_resource type="PackedScene" uid="uid://player_scene" path="res://scenes/player/player.tscn" id="4_player"]
+[ext_resource type="Script" path="res://scripts/debug/player_trail.gd" id="5_trail"]
+[ext_resource type="Script" path="res://scripts/beam/simple_beam.gd" id="6_beam"]
+
+[node name="TestMiasma" type="Node3D"]
+
+[node name="Player" parent="." instance=ExtResource("4_player")]
+
+[node name="PlayerTrail" type="Node3D" parent="."]
+script = ExtResource("5_trail")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+projection = 1
+size = 200.0
+script = ExtResource("1_camera")
+
+[node name="MiasmaRenderer" type="Node3D" parent="."]
+script = ExtResource("2_renderer")
+
+[node name="SimpleBeam" type="Node3D" parent="."]
+script = ExtResource("6_beam")
+
+[node name="UI" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("3_fps")
+
+[editable path="MiasmaRenderer"]
