@@ -33,12 +33,17 @@ var game_time: float = 0.0
 # Wind manager reference
 var wind_manager: Node = null
 
-# Regrowth settings (match reference for gradual creep-in effect)
+# Regrowth settings (match reference implementation)
 # Key: Only boundary tiles regrow, creating gradual creep-in from edges
-const REGROW_DELAY: float = 1.0  # Seconds before cleared tiles can regrow
-const REGROW_CHANCE: float = 0.6  # Probability of regrowth per check (60% chance)
-const REGROW_BUDGET: int = 8  # Max tiles to regrow per frame (very low for gradual creep-in from edges)
+const REGROW_DELAY: float = 1.5  # Seconds before cleared tiles can regrow (timer delay)
+const REGROW_CHANCE: float = 0.15  # Base probability of regrowth per check (15% chance - slower creep)
+const REGROW_SPEED_FACTOR: float = 1.0  # Multiplier for regrowth chance (like reference)
+const REGROW_BUDGET_BASE: int = 128  # Base budget (reduced for slower, more gradual regrowth)
 const REGROW_SCAN_PAD: int = PAD * 4  # Padding for regrowth scan area
+
+# Dynamic regrowth budget (updated based on viewport size, like reference)
+# Reduced to keep regrowth slower and GPU efficient
+var regrow_budget: int = REGROW_BUDGET_BASE
 
 # Offscreen behavior (in tiles)
 const OFFSCREEN_REG_PAD: int = PAD * 6  # Regrow this far past viewport
@@ -46,7 +51,7 @@ const OFFSCREEN_FORGET_PAD: int = PAD * 12  # Beyond this, auto-reset cleared ti
 
 # Performance limits
 const MAX_CLEARED_CAP: int = 50000  # Max cleared tiles to track
-const MAX_REGROW_SCAN_PER_FRAME: int = 4000  # Max frontier tiles to scan per frame
+const MAX_REGROW_SCAN_PER_FRAME: int = 4000  # Max frontier tiles to scan per frame (match reference)
 const CLEARED_TTL_S: float = 0.0  # Time-to-live for cleared tiles (0 = disabled)
 
 # Signal for renderer updates
@@ -82,6 +87,9 @@ func _initialize_default():
 			var pixel_size = viewport.get_visible_rect().size
 			world_height = camera.size * (pixel_size.y / pixel_size.x)
 		initialize_miasma(Vector3.ZERO, world_width, world_height)
+	else:
+		# Fallback: use default budget
+		regrow_budget = REGROW_BUDGET_BASE
 
 # Initialize miasma system
 func initialize_miasma(player_pos: Vector3, viewport_width: float, viewport_height: float):
@@ -94,7 +102,21 @@ func initialize_miasma(player_pos: Vector3, viewport_width: float, viewport_heig
 	viewport_tiles_x = int(coverage_size / MIASMA_TILE_SIZE) + PAD * 2
 	viewport_tiles_z = int(coverage_size / MIASMA_TILE_SIZE) + PAD * 2
 	
+	# Update regrowth budget based on viewport size (like reference updateBudgets)
+	_update_regrow_budget(viewport_width, viewport_height)
+	
 	print("Miasma initialized: ", viewport_tiles_x, "x", viewport_tiles_z, " tiles (inverse model)")
+
+# Update regrowth budget based on viewport size (match reference updateBudgets)
+func _update_regrow_budget(viewport_width: float, viewport_height: float):
+	var view_cols = int(viewport_width / MIASMA_TILE_SIZE)
+	var view_rows = int(viewport_height / MIASMA_TILE_SIZE)
+	var screen_tiles = view_cols * view_rows
+	
+	# Base budget = max(screenTiles, baseBudget) - like reference
+	# Scale it down to keep regrowth slower and GPU efficient
+	# Use ~1/8 of screen tiles for very gradual, efficient regrowth
+	regrow_budget = max(screen_tiles / 8, REGROW_BUDGET_BASE / 2)
 
 # Update player position
 func update_player_position(new_pos: Vector3):
@@ -237,6 +259,16 @@ func _process_regrowth():
 	if frontier.is_empty():
 		return
 	
+	# Update budget if viewport size changed (like reference calls updateBudgets in update)
+	var viewport = get_viewport()
+	if viewport:
+		var camera = viewport.get_camera_3d()
+		if camera:
+			var pixel_size = viewport.get_visible_rect().size
+			var world_width = camera.size if camera.projection == Camera3D.PROJECTION_ORTHOGONAL else 200.0
+			var world_height = camera.size * (pixel_size.y / pixel_size.x) if camera.projection == Camera3D.PROJECTION_ORTHOGONAL else 200.0
+			_update_regrow_budget(world_width, world_height)
+	
 	# Calculate viewport bounds in tile space (world coordinates)
 	var player_tile_x = int(player_position.x / MIASMA_TILE_SIZE)
 	var player_tile_z = int(player_position.z / MIASMA_TILE_SIZE)
@@ -269,24 +301,19 @@ func _process_regrowth():
 	var forget_right = keep_right + max(OFFSCREEN_FORGET_PAD, OFFSCREEN_REG_PAD + PAD)
 	var forget_bottom = keep_bottom + max(OFFSCREEN_FORGET_PAD, OFFSCREEN_REG_PAD + PAD)
 	
-	# Process regrowth
-	var budget = REGROW_BUDGET
+	# Process regrowth (match reference implementation)
+	var budget = regrow_budget  # Use dynamic budget
 	var to_grow = []
 	var to_forget = []
 	var scanned = 0
 	
+	# Calculate regrowth chance with speed factor (like reference: chance * speedFactor)
+	var chance = REGROW_CHANCE * REGROW_SPEED_FACTOR
+	
 	# Scan frontier for regrowth candidates
-	# Match reference logic order: check boundary first, then area, then timing
+	# Match reference: process frontier in order (no shuffling - reference doesn't shuffle)
 	# Frontier stores wind-relative coordinates
-	# OPTIMIZATION: Shuffle frontier keys to avoid processing adjacent tiles together
-	# This creates more natural, gradual creep-in instead of chunks
 	var frontier_keys = frontier.keys()
-	# Shuffle array to randomize processing order (prevents chunks)
-	for i in range(frontier_keys.size() - 1, 0, -1):
-		var j = randi() % (i + 1)
-		var temp = frontier_keys[i]
-		frontier_keys[i] = frontier_keys[j]
-		frontier_keys[j] = temp
 	
 	for tile_pos in frontier_keys:
 		if budget <= 0 or scanned >= MAX_REGROW_SCAN_PER_FRAME:
@@ -326,8 +353,8 @@ func _process_regrowth():
 		if game_time - time_cleared < REGROW_DELAY:
 			continue
 		
-		# Random chance to regrow (match reference: chance * speedFactor)
-		if randf() < REGROW_CHANCE:
+		# Random chance to regrow (match reference: uses chance with speedFactor)
+		if randf() < chance:
 			to_grow.append(tile_pos)
 			budget -= 1
 	
