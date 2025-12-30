@@ -29,7 +29,6 @@ func _ready():
 	
 	# Connect to BeamManager signals
 	beam_manager.beam_mode_changed.connect(_on_beam_mode_changed)
-	beam_manager.beam_energy_changed.connect(_on_beam_energy_changed)
 	
 	# Create initial beam visual
 	_create_beam_visual()
@@ -124,8 +123,17 @@ func _process(_delta):
 	
 	# Position beam well above ground level
 	# Ground is at Y=-1.0, derelict at Y=0, so position beam at Y=2.0 to be clearly visible
-	# This ensures the ellipse doesn't go below ground and is visible above the derelict
 	beam_mesh_instance.position = Vector3(0, 2.0, 0)
+	
+	# Rotate cone/laser toward mouse
+	var current_mode = beam_manager.get_mode()
+	if current_mode == BeamManager.BeamMode.CONE or current_mode == BeamManager.BeamMode.LASER:
+		var mouse_pos = _get_mouse_world_position()
+		if mouse_pos != Vector3.ZERO:
+			var direction = (mouse_pos - ground_pos)
+			if direction.length() > 0.1:
+				var angle = atan2(direction.x, direction.z)  # Y rotation for isometric
+				beam_mesh_instance.rotation.y = angle
 	
 
 func _on_beam_mode_changed(mode):
@@ -137,16 +145,21 @@ func _on_beam_mode_changed(mode):
 	match mode:
 		BeamManager.BeamMode.BUBBLE_MIN, BeamManager.BeamMode.BUBBLE_MAX:
 			# Update radius for bubble mode - use shared radius from BeamManager
-			# This ensures visual matches hitbox exactly
 			current_radius = beam_manager.get_clearing_radius()
 			_update_bubble_visual(current_radius)
+			beam_mesh_instance.rotation.y = 0  # No rotation for bubble
+			beam_mesh_instance.material_override = beam_material  # Use translucent material
 			beam_mesh_instance.visible = true
 		BeamManager.BeamMode.CONE:
-			# TODO: Create cone visual
-			beam_mesh_instance.visible = false
+			# Create cone visual
+			_update_cone_visual(params.get("length", 64.0), params.get("angle", 32.0))
+			beam_mesh_instance.material_override = beam_material  # Use translucent material
+			beam_mesh_instance.visible = true
 		BeamManager.BeamMode.LASER:
-			# TODO: Create laser visual
-			beam_mesh_instance.visible = false
+			# Create laser visual (opaque)
+			_update_laser_visual(params.get("length", 128.0), params.get("thickness", 4.0))
+			beam_mesh_instance.visible = true
+			# Laser uses opaque material (set in _update_laser_visual)
 		BeamManager.BeamMode.OFF:
 			beam_mesh_instance.visible = false
 
@@ -166,16 +179,99 @@ func _update_bubble_visual(radius: float):
 	beam_mesh_instance.mesh = new_circle_mesh
 	current_radius = radius
 
-func _on_beam_energy_changed(energy: float):
-	if not beam_material:
-		return
+
+func _get_mouse_world_position() -> Vector3:
+	# Convert mouse screen position to world position on ground plane (Y=0)
+	var camera = get_viewport().get_camera_3d()
+	if not camera:
+		return Vector3.ZERO
 	
-	# Update opacity based on energy (fade out when low energy)
-	var max_energy = 64.0  # BeamManager.MAX_ENERGY constant
-	var energy_ratio = energy / max_energy
-	var min_opacity = 0.1  # More translucent when low energy
-	var max_opacity = 0.2  # More translucent overall
-	var opacity = lerp(min_opacity, max_opacity, energy_ratio)
+	var mouse_pos = get_viewport().get_mouse_position()
+	var from = camera.project_ray_origin(mouse_pos)
+	var dir = camera.project_ray_normal(mouse_pos)
 	
-	# Keep gold color, just update opacity
-	beam_material.albedo_color = Color(1.0, 0.84, 0.0, opacity)
+	# Intersect with ground plane (Y=0)
+	if abs(dir.y) < 0.001:
+		return Vector3.ZERO
+	
+	var t = -from.y / dir.y
+	if t < 0:
+		return Vector3.ZERO
+	
+	var world_pos = from + dir * t
+	return Vector3(world_pos.x, 0, world_pos.z)
+
+func _update_cone_visual(length: float, angle_deg: float):
+	# Simple cone: triangle on XZ plane pointing forward (Z+)
+	var half_angle = deg_to_rad(angle_deg * 0.5)
+	var tip_radius = tan(half_angle) * length
+	
+	var vertices = PackedVector3Array()
+	var indices = PackedInt32Array()
+	
+	# Tip point (at origin, pointing forward)
+	vertices.append(Vector3(0, 0, 0))
+	
+	# Base arc (circle at distance = length)
+	var segments = 32
+	for i in range(segments + 1):
+		var a = -half_angle + (i * 2.0 * half_angle / segments)
+		var x = sin(a) * tip_radius
+		var z = cos(a) * length
+		vertices.append(Vector3(x, 0, z))
+	
+	# Create triangles from tip to base
+	for i in range(segments):
+		indices.append(0)  # Tip
+		indices.append(i + 1)  # Current base point
+		indices.append(i + 2 if i < segments else 1)  # Next base point
+	
+	var array_mesh = ArrayMesh.new()
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	
+	beam_mesh_instance.mesh = array_mesh
+
+func _update_laser_visual(length: float, thickness: float):
+	# Simple laser: rectangle on XZ plane pointing forward (Z+)
+	var half_thickness = thickness * 0.5
+	
+	var vertices = PackedVector3Array()
+	var indices = PackedInt32Array()
+	
+	# Rectangle vertices (centered on X, pointing forward on Z)
+	vertices.append(Vector3(-half_thickness, 0, 0))  # Base left
+	vertices.append(Vector3(half_thickness, 0, 0))   # Base right
+	vertices.append(Vector3(-half_thickness, 0, length))  # Tip left
+	vertices.append(Vector3(half_thickness, 0, length))    # Tip right
+	
+	# Two triangles
+	indices.append(0)
+	indices.append(1)
+	indices.append(2)
+	
+	indices.append(1)
+	indices.append(3)
+	indices.append(2)
+	
+	var array_mesh = ArrayMesh.new()
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	
+	beam_mesh_instance.mesh = array_mesh
+	
+	# Laser is opaque (unlike bubble/cone)
+	var laser_material = StandardMaterial3D.new()
+	laser_material.albedo_color = Color(1.0, 0.94, 0.0, 1.0)  # Gold, fully opaque
+	laser_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	laser_material.flags_transparent = false
+	laser_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	laser_material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	laser_material.no_depth_test = true
+	beam_mesh_instance.material_override = laser_material

@@ -1,7 +1,7 @@
 extends Node
 
 # BeamManager - Autoload singleton
-# Manages beam system (bubble/cone/laser modes, energy, clearing)
+# Manages beam system (bubble/cone/laser modes, clearing)
 
 # Beam modes
 enum BeamMode {
@@ -14,7 +14,6 @@ enum BeamMode {
 
 # Current state
 var current_mode: BeamMode = BeamMode.BUBBLE_MIN
-var beam_energy: float = 64.0
 var beam_level: int = 1
 
 # Beam parameters (from JS design)
@@ -25,20 +24,8 @@ const CONE_ANGLE_DEG = 32.0
 const LASER_LENGTH = 128.0
 const LASER_THICKNESS = 4.0
 
-# Energy system
-const MAX_ENERGY = 64.0
-const LASER_DRAIN_PER_SEC = 24.0
-const REGEN_RATES = {
-	BeamMode.OFF: 0.0,
-	BeamMode.BUBBLE_MIN: 8.0,
-	BeamMode.BUBBLE_MAX: 6.0,
-	BeamMode.CONE: 4.0,
-	BeamMode.LASER: 0.0  # Drains, doesn't regen
-}
-
 # Signals
 signal beam_mode_changed(mode)
-signal beam_energy_changed(energy)
 signal beam_fired(position, radius)
 
 var miasma_manager: Node = null
@@ -50,23 +37,6 @@ func _ready():
 	
 	print("BeamManager initialized")
 
-func _process(delta):
-	_update_energy(delta)
-
-func _update_energy(delta: float):
-	var old_energy = beam_energy
-	
-	if current_mode == BeamMode.LASER:
-		# Drain energy in laser mode
-		beam_energy = max(0.0, beam_energy - LASER_DRAIN_PER_SEC * delta)
-	else:
-		# Regen energy in other modes
-		var regen_rate = REGEN_RATES.get(current_mode, 0.0)
-		beam_energy = min(MAX_ENERGY, beam_energy + regen_rate * delta)
-	
-	if beam_energy != old_energy:
-		beam_energy_changed.emit(beam_energy)
-
 # Public API
 
 func set_mode(mode: BeamMode):
@@ -77,11 +47,8 @@ func set_mode(mode: BeamMode):
 func get_mode() -> BeamMode:
 	return current_mode
 
-func get_energy() -> float:
-	return beam_energy
-
 func can_fire() -> bool:
-	return beam_energy > 0.0
+	return true  # Always can fire (no energy system)
 
 # Clear miasma at position (called by beam renderer/system)
 func clear_at_position(world_pos: Vector3, radius: float) -> int:

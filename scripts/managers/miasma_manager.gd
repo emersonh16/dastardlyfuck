@@ -90,6 +90,7 @@ func fill_area_around_player():
 			var rotated_x = x - z
 			var rotated_z = x + z
 			
+			# Always use Z=0 for 2D prototyping
 			var tile_pos = Vector3i(center_tile_x + rotated_x, center_tile_z + rotated_z, 0)
 			# Only add if not already present AND not cleared
 			# Cleared tiles should never regrow
@@ -112,8 +113,6 @@ func update_player_position(new_pos: Vector3):
 	
 	# Only update if player crossed a tile boundary
 	if new_center_x != old_center_x or new_center_z != old_center_z:
-		# DIAGNOSTIC: Print player tile position
-		print("Player tile: (", new_center_x, ", ", new_center_z, ") world: ", new_pos)
 		player_position = new_pos
 		fill_area_around_player()
 	else:
@@ -138,6 +137,7 @@ func clear_area(world_pos: Vector3, radius: float):
 			var dist_sq = dx * dx + dz * dz
 			
 			if dist_sq <= radius_sq:
+				# Always use Z=0 for 2D prototyping
 				var tile_pos = Vector3i(center_tile_x + x, center_tile_z + z, 0)
 				if blocks.has(tile_pos):
 					tiles_to_remove.append(tile_pos)

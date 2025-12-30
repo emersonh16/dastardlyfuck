@@ -42,10 +42,6 @@ func _process(_delta):
 	_process_clear()
 
 func _process_clear():
-	# Only clear if beam has energy
-	if not beam_manager.can_fire():
-		return
-	
 	var current_mode = beam_manager.get_mode()
 	var derelict_pos = derelict.global_position
 	var derelict_pos_ground = Vector3(derelict_pos.x, 0, derelict_pos.z)  # Ground level
