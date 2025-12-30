@@ -2,40 +2,29 @@
 
 ## Current State ✅
 
-1. **BeamManager** - Complete
+1. **BeamManager** - Complete ✅
    - All modes defined (BUBBLE_MIN, BUBBLE_MAX, CONE, LASER, OFF)
    - Energy system working (regen/drain)
-   - Clearing API functional
+   - Clearing API functional (bubble, cone, laser)
 
 2. **BeamRenderer** - Partial
-   - ✅ Bubble mode visual (ellipse)
+   - ✅ Bubble mode visual (circle on XZ plane, appears as ellipse)
    - ❌ Cone mode visual (TODO)
    - ❌ Laser mode visual (TODO)
 
-3. **SimpleBeam** - Basic
-   - ✅ Auto-clears around player (bubble mode)
-   - ❌ No input handling
-   - ❌ No mode switching
-   - ❌ No mouse direction
+3. **SimpleBeam** - Complete ✅
+   - ✅ Continuous clearing every frame (all modes)
+   - ✅ Clears immediately on mode switch
+   - ✅ Bubble: clears around player
+   - ✅ Cone/Laser: clears toward mouse position
 
-## Proposed Improvements
+4. **BeamInput** - Complete ✅
+   - ✅ Mouse wheel cycles modes
+   - ✅ Number keys 1-5 for direct mode selection
 
-### Phase 1: Input & Mode Switching (Priority)
-1. **Add input handling:**
-   - Number keys (1-4) to switch modes
-   - Or mouse wheel to cycle modes
-   - Display current mode in UI
+## Remaining Improvements
 
-2. **Mouse direction for cone/laser:**
-   - Get mouse world position
-   - Calculate direction from player to mouse
-   - Use for cone/laser aiming
-
-3. **Click-to-fire:**
-   - Left click = fire beam at mouse position
-   - Or hold for continuous fire
-
-### Phase 2: Visual Improvements
+### Phase 1: Visuals (Priority)
 1. **Cone visual:**
    - Create cone mesh pointing in mouse direction
    - Show cone angle and length
@@ -46,11 +35,7 @@
    - Show laser path from player to mouse
    - Thickness based on LASER_THICKNESS
 
-3. **Better bubble visual:**
-   - Maybe add glow/pulse effect
-   - Better isometric projection
-
-### Phase 3: Integration
+### Phase 2: UI & Integration
 1. **Move clearing logic:**
    - Move from SimpleBeam to DerelictManager or BeamManager
    - Better separation of concerns
@@ -60,29 +45,9 @@
    - Show current mode
    - Visual feedback when low energy
 
-## Questions to Answer
+## Next Steps
 
-1. **How should mode switching work?**
-   - Number keys (1=bubble, 2=cone, 3=laser)?
-   - Mouse wheel scroll?
-   - Tab key to cycle?
-
-2. **How should firing work?**
-   - Click to fire once?
-   - Hold to fire continuously?
-   - Auto-fire in bubble mode (current)?
-
-3. **Mouse direction:**
-   - Should cone/laser always point at mouse?
-   - Or use player facing direction?
-   - Or WASD direction?
-
-## Recommendation: Start with Phase 1
-
-**Next Steps:**
-1. Add number key input (1-4) for mode switching
-2. Add mouse position tracking for cone/laser direction
-3. Add click-to-fire for manual control
-4. Test each mode works correctly
-
-This gives you full control over the beam system before adding visuals.
+1. **Implement cone visual** in BeamRenderer
+2. **Implement laser visual** in BeamRenderer
+3. **Add energy UI** display
+4. **Consider moving clearing logic** from SimpleBeam to DerelictManager (architectural improvement)
