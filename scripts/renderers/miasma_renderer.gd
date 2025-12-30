@@ -3,8 +3,8 @@ extends Node3D
 # MiasmaRenderer - Renders miasma blocks using MultiMeshInstance3D
 
 # Constants (fallback if autoload not ready)
-const MIASMA_TILE_SIZE_X = 4.0  # Smaller blocks for more granular fog
-const MIASMA_TILE_SIZE_Z = 4.0  # Smaller blocks for more granular fog
+const MIASMA_TILE_SIZE_X = 2.0  # Even smaller blocks for more granular fog
+const MIASMA_TILE_SIZE_Z = 2.0  # Even smaller blocks for more granular fog
 const MIASMA_BLOCK_HEIGHT = 16.0
 
 var miasma_manager: Node
@@ -15,7 +15,7 @@ var material: StandardMaterial3D
 # Performance: throttle render updates
 var _pending_update = false
 var _update_timer = 0.0
-const UPDATE_INTERVAL = 0.1  # Update mesh max 10 times per second (reduced for performance)
+const UPDATE_INTERVAL = 0.15  # Update mesh max ~6.7 times per second (reduced for smaller blocks)
 
 func _ready():
 	# Wait for autoload to be ready

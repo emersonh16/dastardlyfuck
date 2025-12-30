@@ -5,8 +5,8 @@ extends Node
 
 # Constants
 # For isometric squares: make X and Z equal so blocks appear square in isometric view
-const MIASMA_TILE_SIZE_X = 4.0  # Smaller blocks for more granular fog
-const MIASMA_TILE_SIZE_Z = 4.0  # Smaller blocks for more granular fog
+const MIASMA_TILE_SIZE_X = 2.0  # Even smaller blocks for more granular fog
+const MIASMA_TILE_SIZE_Z = 2.0  # Even smaller blocks for more granular fog
 const MIASMA_BLOCK_HEIGHT = 16.0
 
 # Block storage: Dictionary of Vector3i -> bool (present/absent)
@@ -20,7 +20,7 @@ var cleared_tiles: Dictionary = {}  # Vector3i -> true (cleared)
 # Viewport + buffer size (in tiles)
 var viewport_tiles_x: int = 0
 var viewport_tiles_z: int = 0
-var buffer_tiles: int = 8  # Buffer around viewport (reduced for performance)
+var buffer_tiles: int = 4  # Buffer around viewport (reduced further for smaller blocks)
 
 # Player position (world space) - miasma moves with player
 var player_position: Vector3 = Vector3.ZERO
