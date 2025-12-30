@@ -5,6 +5,7 @@ extends Node3D
 
 var beam_manager: Node = null
 var derelict: Node3D = null
+var camera: Camera3D = null
 
 # Visual beam mesh
 var beam_mesh_instance: MeshInstance3D = null
@@ -12,6 +13,7 @@ var beam_material: StandardMaterial3D = null
 
 # Current beam mode
 var current_radius: float = 0.0
+var current_mode: BeamManager.BeamMode = BeamManager.BeamMode.OFF
 
 func _ready():
 	# Get BeamManager
@@ -26,6 +28,9 @@ func _ready():
 		derelict = get_tree().get_first_node_in_group("derelict")
 	if not derelict:
 		derelict = get_node_or_null("../Derelict")
+	
+	# Find camera for mouse-to-world conversion
+	camera = get_viewport().get_camera_3d()
 	
 	# Connect to BeamManager signals
 	beam_manager.beam_mode_changed.connect(_on_beam_mode_changed)
@@ -127,11 +132,38 @@ func _process(_delta):
 	# This ensures the ellipse doesn't go below ground and is visible above the derelict
 	beam_mesh_instance.position = Vector3(0, 2.0, 0)
 	
+	# Update cone/laser visuals based on mouse position
+	if current_mode == BeamManager.BeamMode.CONE:
+		var mouse_pos = _get_mouse_world_position()
+		if mouse_pos != Vector3.ZERO:
+			var direction = (mouse_pos - ground_pos)
+			if direction.length() < 0.1:
+				direction = Vector3(1, 0, 0)  # Default forward direction
+			else:
+				direction = direction.normalized()
+			# Ensure direction is in XZ plane
+			direction.y = 0
+			direction = direction.normalized()
+			_update_cone_visual(ground_pos, direction)
+	elif current_mode == BeamManager.BeamMode.LASER:
+		var mouse_pos = _get_mouse_world_position()
+		if mouse_pos != Vector3.ZERO:
+			var direction = (mouse_pos - ground_pos)
+			if direction.length() < 0.1:
+				direction = Vector3(1, 0, 0)  # Default forward direction
+			else:
+				direction = direction.normalized()
+			# Ensure direction is in XZ plane
+			direction.y = 0
+			direction = direction.normalized()
+			_update_laser_visual(ground_pos, direction)
+	
 
 func _on_beam_mode_changed(mode):
 	if not beam_mesh_instance:
 		return
 	
+	current_mode = mode
 	var params = beam_manager.get_clearing_params()
 	
 	match mode:
@@ -142,11 +174,17 @@ func _on_beam_mode_changed(mode):
 			_update_bubble_visual(current_radius)
 			beam_mesh_instance.visible = true
 		BeamManager.BeamMode.CONE:
-			# TODO: Create cone visual
-			beam_mesh_instance.visible = false
+			# Create cone visual with default forward direction
+			var default_direction = Vector3(1, 0, 0)
+			var ground_pos = Vector3(derelict.global_position.x, 0, derelict.global_position.z) if derelict else Vector3.ZERO
+			_update_cone_visual(ground_pos, default_direction)
+			beam_mesh_instance.visible = true
 		BeamManager.BeamMode.LASER:
-			# TODO: Create laser visual
-			beam_mesh_instance.visible = false
+			# Create laser visual with default forward direction
+			var default_direction = Vector3(1, 0, 0)
+			var ground_pos = Vector3(derelict.global_position.x, 0, derelict.global_position.z) if derelict else Vector3.ZERO
+			_update_laser_visual(ground_pos, default_direction)
+			beam_mesh_instance.visible = true
 		BeamManager.BeamMode.OFF:
 			beam_mesh_instance.visible = false
 
@@ -179,3 +217,175 @@ func _on_beam_energy_changed(energy: float):
 	
 	# Keep gold color, just update opacity
 	beam_material.albedo_color = Color(1.0, 0.84, 0.0, opacity)
+
+# Helper function to get mouse world position (reused from SimpleBeam logic)
+func _get_mouse_world_position() -> Vector3:
+	# Convert mouse screen position to world position on ground plane (Y=0)
+	if not camera:
+		return Vector3.ZERO
+	
+	var mouse_pos = get_viewport().get_mouse_position()
+	var from = camera.project_ray_origin(mouse_pos)
+	var dir = camera.project_ray_normal(mouse_pos)
+	
+	# Intersect with ground plane (Y=0)
+	# Ray: from + t*dir, find t where Y=0
+	# from.y + t*dir.y = 0
+	# t = -from.y / dir.y
+	
+	if abs(dir.y) < 0.001:
+		# Ray is parallel to ground, return zero
+		return Vector3.ZERO
+	
+	var t = -from.y / dir.y
+	if t < 0:
+		# Ray points away from ground
+		return Vector3.ZERO
+	
+	var world_pos = from + dir * t
+	return Vector3(world_pos.x, 0, world_pos.z)
+
+# Create cone sector mesh (pie slice shape)
+func _create_cone_sector_mesh(direction: Vector3, length: float, angle_deg: float) -> ArrayMesh:
+	# Create a flat sector (pie slice) on XZ plane
+	# Sector spans from origin, expanding outward in the given direction
+	
+	var angle_rad = deg_to_rad(angle_deg)
+	var segments = 32  # Number of segments for smooth arc
+	var vertices = PackedVector3Array()
+	var indices = PackedInt32Array()
+	
+	# Ensure direction is normalized and in XZ plane
+	direction.y = 0
+	direction = direction.normalized()
+	
+	# Calculate rotation angle using atan2 (simpler and more direct)
+	# atan2(z, x) gives angle from positive X axis in XZ plane
+	var rotation_angle = atan2(direction.z, direction.x)
+	
+	# Origin vertex (at 0, 0, 0)
+	vertices.append(Vector3(0, 0, 0))
+	
+	# Generate arc vertices in local space (pointing forward along X axis)
+	# Then rotate them to match direction
+	for i in range(segments + 1):
+		var t = float(i) / float(segments)  # 0 to 1
+		# Calculate angle from -angle_rad to +angle_rad
+		var local_angle = lerp(-angle_rad, angle_rad, t)
+		# Create vertex in local space (forward along X, rotated by local_angle)
+		var local_vertex = Vector3(cos(local_angle), 0, sin(local_angle)) * length
+		# Rotate to match direction
+		var rotated_vertex = local_vertex.rotated(Vector3.UP, rotation_angle)
+		vertices.append(rotated_vertex)
+	
+	# Create triangles from origin to arc (fan pattern)
+	for i in range(segments):
+		indices.append(0)  # Origin vertex
+		indices.append(i + 1)  # Current arc vertex
+		indices.append(i + 2)  # Next arc vertex
+	
+	# Create the mesh
+	var array_mesh = ArrayMesh.new()
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	
+	return array_mesh
+
+# Create laser rectangle mesh (flat rectangle along direction)
+func _create_laser_rectangle_mesh(direction: Vector3, length: float, thickness: float) -> ArrayMesh:
+	# Create a flat rectangle on XZ plane
+	# Rectangle starts at origin and extends outward along direction (not centered)
+	
+	var vertices = PackedVector3Array()
+	var indices = PackedInt32Array()
+	
+	# Ensure direction is normalized and in XZ plane
+	direction.y = 0
+	direction = direction.normalized()
+	
+	# Calculate rotation angle using atan2 (simpler and more direct)
+	# atan2(z, x) gives angle from positive X axis in XZ plane
+	var rotation_angle = atan2(direction.z, direction.x)
+	
+	# Calculate half thickness (width perpendicular to direction)
+	var half_thickness = thickness * 0.5
+	
+	# Create 4 vertices in local space (pointing forward along X axis)
+	# Rectangle starts at origin (0, 0, 0) and extends to (length, 0, 0)
+	var local_vertices = [
+		Vector3(0, 0, -half_thickness),        # Origin-left
+		Vector3(0, 0, half_thickness),         # Origin-right
+		Vector3(length, 0, half_thickness),   # End-right
+		Vector3(length, 0, -half_thickness)    # End-left
+	]
+	
+	# Rotate all vertices to match direction
+	for local_vertex in local_vertices:
+		var rotated_vertex = local_vertex.rotated(Vector3.UP, rotation_angle)
+		vertices.append(rotated_vertex)
+	
+	# Create 2 triangles forming the rectangle
+	# Triangle 1: Origin-left, Origin-right, End-right
+	indices.append(0)
+	indices.append(1)
+	indices.append(2)
+	
+	# Triangle 2: Origin-left, End-right, End-left
+	indices.append(0)
+	indices.append(2)
+	indices.append(3)
+	
+	# Create the mesh
+	var array_mesh = ArrayMesh.new()
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	
+	return array_mesh
+
+# Update cone visual
+func _update_cone_visual(origin: Vector3, direction: Vector3):
+	if not beam_mesh_instance or not beam_manager:
+		return
+	
+	# Get parameters from BeamManager (single source of truth)
+	var params = beam_manager.get_clearing_params()
+	var length = params.get("length", 64.0)
+	var angle = params.get("angle", 32.0)
+	
+	# Ensure direction is normalized and in XZ plane
+	direction.y = 0
+	direction = direction.normalized()
+	if direction.length_squared() < 0.01:
+		direction = Vector3(1, 0, 0)  # Default forward
+	
+	# Create cone sector mesh
+	var cone_mesh = _create_cone_sector_mesh(direction, length, angle)
+	beam_mesh_instance.mesh = cone_mesh
+
+# Update laser visual
+func _update_laser_visual(origin: Vector3, direction: Vector3):
+	if not beam_mesh_instance or not beam_manager:
+		return
+	
+	# Get parameters from BeamManager (single source of truth)
+	var params = beam_manager.get_clearing_params()
+	var length = params.get("length", 128.0)
+	var thickness = params.get("thickness", 4.0)
+	
+	# Ensure direction is normalized and in XZ plane
+	direction.y = 0
+	direction = direction.normalized()
+	if direction.length_squared() < 0.01:
+		direction = Vector3(1, 0, 0)  # Default forward
+	
+	# Create laser rectangle mesh
+	var laser_mesh = _create_laser_rectangle_mesh(direction, length, thickness)
+	beam_mesh_instance.mesh = laser_mesh
