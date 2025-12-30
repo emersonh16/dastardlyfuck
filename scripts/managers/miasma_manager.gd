@@ -29,6 +29,16 @@ var game_time: float = 0.0
 const REGROW_DELAY: float = 1.0  # Seconds before cleared tiles can regrow
 const REGROW_CHANCE: float = 0.6  # Probability of regrowth per check
 const REGROW_BUDGET: int = 512  # Max tiles to check for regrowth per frame
+const REGROW_SCAN_PAD: int = PAD * 4  # Padding for regrowth scan area
+
+# Offscreen behavior (in tiles)
+const OFFSCREEN_REG_PAD: int = PAD * 6  # Regrow this far past viewport
+const OFFSCREEN_FORGET_PAD: int = PAD * 12  # Beyond this, auto-reset cleared tiles
+
+# Performance limits
+const MAX_CLEARED_CAP: int = 50000  # Max cleared tiles to track
+const MAX_REGROW_SCAN_PER_FRAME: int = 4000  # Max frontier tiles to scan per frame
+const CLEARED_TTL_S: float = 0.0  # Time-to-live for cleared tiles (0 = disabled)
 
 # Signal for renderer updates
 signal cleared_changed()  # Emitted when cleared tiles change
@@ -39,7 +49,7 @@ func _ready():
 
 func _process(delta):
 	game_time += delta
-	# Regrowth logic can go here later
+	_process_regrowth()
 
 func _initialize_default():
 	var viewport = get_viewport()
@@ -159,3 +169,147 @@ func get_tile_size() -> float:
 # Get viewport size in tiles
 func get_viewport_tiles() -> Vector2i:
 	return Vector2i(viewport_tiles_x, viewport_tiles_z)
+
+# Process regrowth - called every frame
+func _process_regrowth():
+	if frontier.is_empty():
+		return
+	
+	# Calculate viewport bounds in tile space
+	var player_tile_x = int(player_position.x / MIASMA_TILE_SIZE)
+	var player_tile_z = int(player_position.z / MIASMA_TILE_SIZE)
+	
+	# Viewport bounds (centered on player)
+	var view_cols = viewport_tiles_x
+	var view_rows = viewport_tiles_z
+	var base_tx = player_tile_x - view_cols / 2
+	var base_tz = player_tile_z - view_rows / 2
+	
+	# Keep area (viewport + small padding)
+	var keep_left = base_tx - PAD
+	var keep_top = base_tz - PAD
+	var keep_right = keep_left + view_cols + PAD * 2
+	var keep_bottom = keep_top + view_rows + PAD * 2
+	
+	# Regrow area (extended beyond keep area)
+	var reg_left = keep_left - OFFSCREEN_REG_PAD
+	var reg_top = keep_top - OFFSCREEN_REG_PAD
+	var reg_right = keep_right + OFFSCREEN_REG_PAD
+	var reg_bottom = keep_bottom + OFFSCREEN_REG_PAD
+	
+	# Forget area (far from viewport)
+	var forget_left = keep_left - max(OFFSCREEN_FORGET_PAD, OFFSCREEN_REG_PAD + PAD)
+	var forget_top = keep_top - max(OFFSCREEN_FORGET_PAD, OFFSCREEN_REG_PAD + PAD)
+	var forget_right = keep_right + max(OFFSCREEN_FORGET_PAD, OFFSCREEN_REG_PAD + PAD)
+	var forget_bottom = keep_bottom + max(OFFSCREEN_FORGET_PAD, OFFSCREEN_REG_PAD + PAD)
+	
+	# Process regrowth
+	var budget = REGROW_BUDGET
+	var to_grow = []
+	var to_forget = []
+	var scanned = 0
+	
+	# Scan frontier for regrowth candidates
+	# Convert to array to avoid modification during iteration
+	var frontier_keys = frontier.keys()
+	for tile_pos in frontier_keys:
+		if budget <= 0 or scanned >= MAX_REGROW_SCAN_PER_FRAME:
+			break
+		scanned += 1
+		
+		# Check if tile is still cleared
+		if not cleared_tiles.has(tile_pos):
+			frontier.erase(tile_pos)
+			continue
+		
+		var tx = tile_pos.x
+		var tz = tile_pos.y
+		
+		# Forget tiles far from viewport
+		if tx < forget_left or tx >= forget_right or tz < forget_top or tz >= forget_bottom:
+			to_forget.append(tile_pos)
+			continue
+		
+		# Only regrow within regrow area
+		if tx < reg_left or tx >= reg_right or tz < reg_top or tz >= reg_bottom:
+			continue
+		
+		# Check if still on boundary
+		if not _is_boundary(tile_pos):
+			frontier.erase(tile_pos)
+			continue
+		
+		# Check if enough time has passed
+		var time_cleared = cleared_tiles[tile_pos]
+		if game_time - time_cleared < REGROW_DELAY:
+			continue
+		
+		# Random chance to regrow
+		if randf() < REGROW_CHANCE:
+			to_grow.append(tile_pos)
+			budget -= 1
+	
+	# Regrow tiles (remove from cleared_tiles)
+	for tile_pos in to_grow:
+		_remove_cleared_tile(tile_pos)
+	
+	# Forget offscreen tiles
+	for tile_pos in to_forget:
+		_remove_cleared_tile(tile_pos)
+	
+	# Cleanup: TTL-based removal (if enabled)
+	if CLEARED_TTL_S > 0.0:
+		var to_remove = []
+		var cleared_keys = cleared_tiles.keys()
+		for tile_pos in cleared_keys:
+			var time_cleared = cleared_tiles[tile_pos]
+			if game_time - time_cleared > CLEARED_TTL_S:
+				to_remove.append(tile_pos)
+		for tile_pos in to_remove:
+			_remove_cleared_tile(tile_pos)
+	
+	# Cleanup: Cap total cleared tiles (remove oldest if over limit)
+	if cleared_tiles.size() > MAX_CLEARED_CAP:
+		var overflow = cleared_tiles.size() - MAX_CLEARED_CAP
+		var candidates = []
+		
+		# Collect candidates (sample to avoid full scan)
+		var scanned_count = 0
+		var cleared_keys = cleared_tiles.keys()
+		for tile_pos in cleared_keys:
+			candidates.append({"pos": tile_pos, "time": cleared_tiles[tile_pos]})
+			scanned_count += 1
+			if scanned_count >= min(cleared_tiles.size(), overflow * 2):
+				break
+		
+		# Sort by time (oldest first)
+		candidates.sort_custom(func(a, b): return a.time < b.time)
+		
+		# Remove oldest
+		var removed = 0
+		for i in range(min(overflow, candidates.size())):
+			_remove_cleared_tile(candidates[i].pos)
+			removed += 1
+			if removed >= overflow:
+				break
+	
+	# Emit signal if changes occurred
+	if to_grow.size() > 0 or to_forget.size() > 0:
+		cleared_changed.emit()
+
+# Remove a cleared tile (regrow it)
+func _remove_cleared_tile(tile_pos: Vector2i):
+	if not cleared_tiles.has(tile_pos):
+		return
+	
+	# Remove from cleared tiles
+	cleared_tiles.erase(tile_pos)
+	
+	# Remove from frontier
+	frontier.erase(tile_pos)
+	
+	# Update neighbors (they might now be on boundary)
+	_update_neighbor_frontier(Vector2i(tile_pos.x - 1, tile_pos.y))
+	_update_neighbor_frontier(Vector2i(tile_pos.x + 1, tile_pos.y))
+	_update_neighbor_frontier(Vector2i(tile_pos.x, tile_pos.y - 1))
+	_update_neighbor_frontier(Vector2i(tile_pos.x, tile_pos.y + 1))
