@@ -75,6 +75,16 @@ func initialize_world(seed: int):
 		)
 		print("WorldManager: Generated mountains")
 	
+	# Generate rocks in the world
+	var rock_manager = get_node_or_null("/root/RockManager")
+	if rock_manager:
+		var world_size_world_units = WORLD_SIZE_TILES * GROUND_TILE_SIZE
+		rock_manager.generate_rocks_in_area(
+			0.0, world_size_world_units,
+			0.0, world_size_world_units
+		)
+		print("WorldManager: Generated rocks")
+	
 	world_generated.emit()
 
 # Get biome at world position

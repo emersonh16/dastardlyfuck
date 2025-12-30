@@ -10,6 +10,7 @@
 [ext_resource type="Script" uid="uid://c45d53fbcw6a" path="res://scripts/renderers/beam_renderer.gd" id="8_beam_renderer"]
 [ext_resource type="Script" uid="uid://dhduvjpi8ass1" path="res://scripts/beam/beam_input.gd" id="9_beam_input"]
 [ext_resource type="Script" path="res://scripts/renderers/mountain_renderer.gd" id="10_mountain"]
+[ext_resource type="Script" path="res://scripts/renderers/rock_renderer.gd" id="11_rock"]
 
 [node name="TestMiasma" type="Node3D"]
 
@@ -42,6 +43,9 @@ script = ExtResource("9_beam_input")
 
 [node name="MountainRenderer" type="Node3D" parent="."]
 script = ExtResource("10_mountain")
+
+[node name="RockRenderer" type="Node3D" parent="."]
+script = ExtResource("11_rock")
 
 [node name="UI" type="Control" parent="."]
 layout_mode = 3
