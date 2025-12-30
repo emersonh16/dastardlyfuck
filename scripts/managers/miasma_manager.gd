@@ -22,8 +22,16 @@ var viewport_tiles_x: int = 0
 var viewport_tiles_z: int = 0
 var player_position: Vector3 = Vector3.ZERO
 
+# Wind advection offset (in tiles, can be fractional)
+# This represents how much the miasma coordinate system has drifted due to wind
+var wind_offset_x: float = 0.0
+var wind_offset_z: float = 0.0
+
 # Time tracking for regrowth
 var game_time: float = 0.0
+
+# Wind manager reference
+var wind_manager: Node = null
 
 # Regrowth settings
 const REGROW_DELAY: float = 1.0  # Seconds before cleared tiles can regrow
@@ -45,10 +53,21 @@ signal cleared_changed()  # Emitted when cleared tiles change
 
 func _ready():
 	print("MiasmaManager initialized (inverse model - track cleared tiles)")
+	wind_manager = get_node_or_null("/root/WindManager")
+	if wind_manager:
+		wind_manager.wind_changed.connect(_on_wind_changed)
 	call_deferred("_initialize_default")
 
 func _process(delta):
 	game_time += delta
+	
+	# Apply wind advection (move miasma coordinate system)
+	if wind_manager and wind_manager.enabled:
+		var wind_vel = wind_manager.get_velocity()
+		# Convert velocity (tiles/sec) to offset delta
+		wind_offset_x += wind_vel.x * delta
+		wind_offset_z += wind_vel.y * delta  # Note: wind_vel.y is Z in world space
+	
 	_process_regrowth()
 
 func _initialize_default():
@@ -89,9 +108,13 @@ func clear_area(world_pos: Vector3, radius: float) -> int:
 	var snapped_x = world_pos.x
 	var snapped_z = world_pos.z
 	
-	# Convert to tile coordinates
+	# Convert to tile coordinates (world space)
 	var center_tile_x = int(snapped_x / MIASMA_TILE_SIZE)
 	var center_tile_z = int(snapped_z / MIASMA_TILE_SIZE)
+	
+	# Convert to wind-relative coordinates (like reference: tx - S.fxTiles)
+	var fx_offset = int(wind_offset_x)
+	var fz_offset = int(wind_offset_z)
 	var radius_tiles = int(radius / MIASMA_TILE_SIZE) + 1
 	var radius_sq = radius * radius
 	
@@ -114,7 +137,10 @@ func clear_area(world_pos: Vector3, radius: float) -> int:
 			var dist_sq = dxw * dxw + dzw * dzw
 			
 			if dist_sq <= radius_sq:
-				var tile_pos = Vector2i(tx, tz)
+				# Convert to wind-relative coordinates for storage
+				var fx = tx - fx_offset
+				var fz = tz - fz_offset
+				var tile_pos = Vector2i(fx, fz)
 				# Only clear if not already cleared
 				if not cleared_tiles.has(tile_pos):
 					tiles_to_clear.append(tile_pos)
@@ -131,19 +157,35 @@ func clear_area(world_pos: Vector3, radius: float) -> int:
 	return cleared
 
 # Check if a tile is cleared (for rendering/sampling)
+# Takes world tile coordinates, converts to wind-relative for lookup
 func is_cleared(tile_x: int, tile_z: int) -> bool:
-	var tile_pos = Vector2i(tile_x, tile_z)
+	# Convert world tile coords to wind-relative coords
+	var fx_offset = int(wind_offset_x)
+	var fz_offset = int(wind_offset_z)
+	var fx = tile_x - fx_offset
+	var fz = tile_z - fz_offset
+	var tile_pos = Vector2i(fx, fz)
 	return cleared_tiles.has(tile_pos)
 
 # Get all cleared tiles in viewport area (for rendering)
+# Takes world tile coordinates, converts to wind-relative for lookup
 func get_cleared_tiles_in_area(center_tile_x: int, center_tile_z: int, half_x: int, half_z: int) -> Dictionary:
 	var result = {}
 	
+	# Convert world tile coords to wind-relative coords
+	var fx_offset = int(wind_offset_x)
+	var fz_offset = int(wind_offset_z)
+	
 	for x in range(center_tile_x - half_x, center_tile_x + half_x):
 		for z in range(center_tile_z - half_z, center_tile_z + half_z):
-			var tile_pos = Vector2i(x, z)
+			# Convert to wind-relative
+			var fx = x - fx_offset
+			var fz = z - fz_offset
+			var tile_pos = Vector2i(fx, fz)
 			if cleared_tiles.has(tile_pos):
-				result[tile_pos] = cleared_tiles[tile_pos]
+				# Store with world coordinates for renderer
+				var world_pos = Vector2i(x, z)
+				result[world_pos] = cleared_tiles[tile_pos]
 	
 	return result
 
@@ -184,12 +226,17 @@ func get_tile_size() -> float:
 func get_viewport_tiles() -> Vector2i:
 	return Vector2i(viewport_tiles_x, viewport_tiles_z)
 
+# Handle wind changes (signal callback)
+func _on_wind_changed(_velocity: Vector2):
+	# Wind changed - advection is applied in _process(), so no action needed here
+	pass
+
 # Process regrowth - called every frame
 func _process_regrowth():
 	if frontier.is_empty():
 		return
 	
-	# Calculate viewport bounds in tile space
+	# Calculate viewport bounds in tile space (world coordinates)
 	var player_tile_x = int(player_position.x / MIASMA_TILE_SIZE)
 	var player_tile_z = int(player_position.z / MIASMA_TILE_SIZE)
 	
@@ -198,6 +245,10 @@ func _process_regrowth():
 	var view_rows = viewport_tiles_z
 	var base_tx = player_tile_x - view_cols / 2
 	var base_tz = player_tile_z - view_rows / 2
+	
+	# Convert to wind-relative coordinates for frontier checks
+	var fx_offset = int(wind_offset_x)
+	var fz_offset = int(wind_offset_z)
 	
 	# Keep area (viewport + small padding)
 	var keep_left = base_tx - PAD
@@ -225,6 +276,7 @@ func _process_regrowth():
 	
 	# Scan frontier for regrowth candidates
 	# Match reference logic order: check boundary first, then area, then timing
+	# Frontier stores wind-relative coordinates
 	var frontier_keys = frontier.keys()
 	for tile_pos in frontier_keys:
 		if budget <= 0 or scanned >= MAX_REGROW_SCAN_PER_FRAME:
@@ -232,15 +284,18 @@ func _process_regrowth():
 		scanned += 1
 		
 		# Get time_cleared (cache the lookup)
+		# tile_pos is in wind-relative coordinates
 		var time_cleared = cleared_tiles.get(tile_pos)
 		if time_cleared == null:
 			# Tile no longer cleared - remove from frontier
 			frontier.erase(tile_pos)
 			continue
 		
-		# Get world tile coordinates (in our system, frontier uses world coords directly)
-		var tx = tile_pos.x
-		var tz = tile_pos.y
+		# Convert wind-relative coords to world coords for bounds checking
+		var fx = tile_pos.x
+		var fz = tile_pos.y
+		var tx = fx + fx_offset
+		var tz = fz + fz_offset
 		
 		# Forget tiles far from viewport (check first, like reference)
 		if tx < forget_left or tx >= forget_right or tz < forget_top or tz >= forget_bottom:
