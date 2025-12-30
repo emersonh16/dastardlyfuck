@@ -29,26 +29,32 @@ func _physics_process(_delta):
 	
 	# Arrow keys
 	if Input.is_action_pressed("ui_right"):
-		input_dir.x += 1
+		input_dir.y -= 1
 	if Input.is_action_pressed("ui_left"):
-		input_dir.x -= 1
+		input_dir.y += 1
 	if Input.is_action_pressed("ui_down"):
-		input_dir.y += 1
-	if Input.is_action_pressed("ui_up"):
-		input_dir.y -= 1
-	
-	# WASD keys
-	if Input.is_key_pressed(KEY_D):
-		input_dir.x += 1
-	if Input.is_key_pressed(KEY_A):
 		input_dir.x -= 1
-	if Input.is_key_pressed(KEY_S):
-		input_dir.y += 1
-	if Input.is_key_pressed(KEY_W):
-		input_dir.y -= 1
+	if Input.is_action_pressed("ui_up"):
+		input_dir.x += 1
 	
-	# Convert 2D input to 3D movement (XZ plane for isometric)
-	var move_dir = Vector3(input_dir.x, 0, input_dir.y)
+	# WASD keys - swap W and S
+	if Input.is_key_pressed(KEY_D):
+		input_dir.y -= 1  # D = right
+	if Input.is_key_pressed(KEY_A):
+		input_dir.y += 1  # A = left
+	if Input.is_key_pressed(KEY_S):
+		input_dir.x += 1  # S = down (swapped with W)
+	if Input.is_key_pressed(KEY_W):
+		input_dir.x -= 1  # W = up (swapped with S)
+	
+	# Screen-space to world-space for isometric
+	# Current: A→up, D→down, W→left, S→right
+	# Desired: W→up, S→down, D→right, A→left
+	# Try negating y: world_x = -y + x, world_z = y + x
+	var world_x = -input_dir.y + input_dir.x
+	var world_z = input_dir.y + input_dir.x
+	
+	var move_dir = Vector3(world_x, 0, world_z)
 	
 	# Set velocity for CharacterBody3D
 	if move_dir.length() > 0:
