@@ -33,10 +33,11 @@ var game_time: float = 0.0
 # Wind manager reference
 var wind_manager: Node = null
 
-# Regrowth settings
+# Regrowth settings (match reference for gradual creep-in effect)
+# Key: Only boundary tiles regrow, creating gradual creep-in from edges
 const REGROW_DELAY: float = 1.0  # Seconds before cleared tiles can regrow
-const REGROW_CHANCE: float = 0.6  # Probability of regrowth per check
-const REGROW_BUDGET: int = 512  # Max tiles to check for regrowth per frame
+const REGROW_CHANCE: float = 0.6  # Probability of regrowth per check (60% chance)
+const REGROW_BUDGET: int = 8  # Max tiles to regrow per frame (very low for gradual creep-in from edges)
 const REGROW_SCAN_PAD: int = PAD * 4  # Padding for regrowth scan area
 
 # Offscreen behavior (in tiles)
@@ -277,7 +278,16 @@ func _process_regrowth():
 	# Scan frontier for regrowth candidates
 	# Match reference logic order: check boundary first, then area, then timing
 	# Frontier stores wind-relative coordinates
+	# OPTIMIZATION: Shuffle frontier keys to avoid processing adjacent tiles together
+	# This creates more natural, gradual creep-in instead of chunks
 	var frontier_keys = frontier.keys()
+	# Shuffle array to randomize processing order (prevents chunks)
+	for i in range(frontier_keys.size() - 1, 0, -1):
+		var j = randi() % (i + 1)
+		var temp = frontier_keys[i]
+		frontier_keys[i] = frontier_keys[j]
+		frontier_keys[j] = temp
+	
 	for tile_pos in frontier_keys:
 		if budget <= 0 or scanned >= MAX_REGROW_SCAN_PER_FRAME:
 			break

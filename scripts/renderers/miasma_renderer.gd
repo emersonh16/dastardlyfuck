@@ -10,7 +10,10 @@ var material: StandardMaterial3D
 # Track visible bounds to only rebuild when needed
 var _last_visible_bounds: Dictionary = {}
 var _last_wind_offset: Vector2 = Vector2.ZERO
+var _last_player_tile: Vector2i = Vector2i(0, 0)
 var wind_manager: Node = null
+const WIND_REBUILD_THRESHOLD: float = 1.0  # Rebuild when wind moves > 1 tile (was 0.1)
+const PLAYER_TILE_THRESHOLD: int = 2  # Rebuild when player moves > 2 tiles
 
 func _ready():
 	await get_tree().process_frame
@@ -70,7 +73,29 @@ func _do_render_update():
 	if not miasma_manager or not mesh_instance:
 		return
 	
-	# Get viewport info
+	# Get player position (sheet follows player, not camera)
+	var player_pos = miasma_manager.player_position
+	var player_ground = Vector3(player_pos.x, 0, player_pos.z)
+	
+	# Quick early exit checks before expensive calculations
+	var tile_size = miasma_manager.get_tile_size()
+	var current_wind_offset = Vector2(miasma_manager.wind_offset_x, miasma_manager.wind_offset_z)
+	var wind_moved = current_wind_offset.distance_to(_last_wind_offset) >= WIND_REBUILD_THRESHOLD
+	
+	# Check if player moved significantly (tile-based check is fast)
+	var player_tile_x = int(player_pos.x / tile_size)
+	var player_tile_z = int(player_pos.z / tile_size)
+	var current_player_tile = Vector2i(player_tile_x, player_tile_z)
+	var player_tile_delta = current_player_tile - _last_player_tile
+	var player_moved = abs(player_tile_delta.x) >= PLAYER_TILE_THRESHOLD or abs(player_tile_delta.y) >= PLAYER_TILE_THRESHOLD
+	
+	# Early exit: if nothing significant changed, just update position
+	# (Wind advection is smooth, so small movements don't need mesh rebuild)
+	if not wind_moved and not player_moved:
+		global_position = player_ground
+		return
+	
+	# Get viewport info (only do expensive calculations if we need to rebuild)
 	var viewport = get_viewport()
 	if not viewport:
 		return
@@ -78,12 +103,6 @@ func _do_render_update():
 	var camera = viewport.get_camera_3d()
 	if not camera:
 		return
-	
-	# Get player position (sheet follows player, not camera)
-	var player_pos = miasma_manager.player_position
-	var player_ground = Vector3(player_pos.x, 0, player_pos.z)
-	
-	var tile_size = miasma_manager.get_tile_size()
 	
 	# Calculate visible world bounds by projecting screen corners to ground plane
 	# This accounts for isometric camera rotation - we only render what's actually visible
@@ -146,20 +165,14 @@ func _do_render_update():
 		min_z -= padding
 		max_z += padding
 	
-	# Check if bounds changed OR wind offset changed (wind moves miasma)
+	# Check if bounds changed (we already checked wind/player movement above)
 	var current_bounds = {"min_x": min_x, "max_x": max_x, "min_z": min_z, "max_z": max_z}
-	var current_wind_offset = Vector2(miasma_manager.wind_offset_x, miasma_manager.wind_offset_z)
-	
 	var bounds_changed = current_bounds.hash() != _last_visible_bounds.hash()
-	var wind_changed = current_wind_offset.distance_to(_last_wind_offset) > 0.1  # Rebuild if wind moved > 0.1 tiles
 	
-	if not bounds_changed and not wind_changed:
-		# Just update position, don't rebuild mesh
-		global_position = player_ground
-		return
-	
+	# Update tracking variables
 	_last_visible_bounds = current_bounds
 	_last_wind_offset = current_wind_offset
+	_last_player_tile = current_player_tile
 	
 	# Calculate tile bounds
 	var min_tile_x = int(min_x / tile_size)
