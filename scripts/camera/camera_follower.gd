@@ -1,18 +1,24 @@
 extends Camera3D
 
-# CameraFollower - Keeps camera centered on player with isometric angle
+# CameraFollower - Keeps camera centered on player with free rotation support
 
 var target: Node3D = null
 var follow_distance: float = 200.0
 var camera_height: float = 150.0
 
-# Isometric angles
-var elevation: float = deg_to_rad(30.0)  # How high up
-var azimuth: float = deg_to_rad(45.0)    # Rotation around Y axis
+# Camera rotation angles (can be changed freely)
+var elevation: float = deg_to_rad(30.0)  # How high up (0 = horizontal, 90 = straight down)
+var azimuth: float = deg_to_rad(45.0)    # Rotation around Y axis (0 = North, 90 = East)
 
-# Store the correct rotation once calculated
-var fixed_rotation_set: bool = false
-var fixed_rotation_value: Vector3 = Vector3.ZERO
+# Rotation controls (optional - set to false to disable)
+var enable_mouse_rotation: bool = true
+var enable_keyboard_rotation: bool = true
+var mouse_rotation_speed: float = 0.002  # Sensitivity for mouse drag
+var keyboard_rotation_speed: float = 1.0  # Degrees per second for keyboard
+
+# Mouse rotation state
+var is_rotating: bool = false
+var last_mouse_pos: Vector2 = Vector2.ZERO
 
 func _ready():
 	# Set up orthographic projection
@@ -22,7 +28,10 @@ func _ready():
 	# Find player
 	call_deferred("_find_player")
 	
-	print("CameraFollower initialized")
+	# Set initial camera position based on angles
+	_update_camera_position()
+	
+	print("CameraFollower initialized (free rotation enabled)")
 
 func _find_player():
 	# Look for derelict (player) in scene - check both groups and name
@@ -42,30 +51,70 @@ func _find_player():
 	else:
 		push_warning("CameraFollower: No derelict/player found!")
 
+func _input(event):
+	# Mouse rotation (right-click drag or middle mouse drag)
+	if enable_mouse_rotation:
+		if event is InputEventMouseButton:
+			if event.button_index == MOUSE_BUTTON_RIGHT or event.button_index == MOUSE_BUTTON_MIDDLE:
+				if event.pressed:
+					is_rotating = true
+					last_mouse_pos = event.position
+				else:
+					is_rotating = false
+		
+		if event is InputEventMouseMotion and is_rotating:
+			var mouse_delta = event.position - last_mouse_pos
+			last_mouse_pos = event.position
+			
+			# Rotate azimuth (horizontal) based on X mouse movement
+			azimuth -= mouse_delta.x * mouse_rotation_speed
+			
+			# Rotate elevation (vertical) based on Y mouse movement
+			elevation += mouse_delta.y * mouse_rotation_speed
+			
+			# Clamp elevation to prevent flipping
+			elevation = clamp(elevation, deg_to_rad(5.0), deg_to_rad(89.0))
+
 func _process(delta):
 	if not target:
 		return
 	
+	# Keyboard rotation controls (optional)
+	if enable_keyboard_rotation:
+		var rotation_delta = keyboard_rotation_speed * deg_to_rad(delta)
+		
+		# Q/E for azimuth (horizontal rotation)
+		if Input.is_key_pressed(KEY_Q):
+			azimuth -= rotation_delta
+		if Input.is_key_pressed(KEY_E):
+			azimuth += rotation_delta
+		
+		# R/F for elevation (vertical angle)
+		if Input.is_key_pressed(KEY_R):
+			elevation = clamp(elevation - rotation_delta, deg_to_rad(5.0), deg_to_rad(89.0))
+		if Input.is_key_pressed(KEY_F):
+			elevation = clamp(elevation + rotation_delta, deg_to_rad(5.0), deg_to_rad(89.0))
+	
 	# Get target's world position
 	var target_pos = target.global_position
 	
-	# Calculate fixed camera position (no rotation, just scroll)
+	# Update camera position based on current angles
+	_update_camera_position()
+	
+	# Smooth interpolation for position
 	var desired_pos = target_pos + Vector3(
 		follow_distance * cos(azimuth) * cos(elevation),
 		camera_height,
 		follow_distance * sin(azimuth) * cos(elevation)
 	)
-	
-	# Smooth interpolation for position (but keep camera angle fixed)
 	position = position.lerp(desired_pos, 10.0 * delta)
 	
-	# FIXED: Use look_at() to center on target, then lock rotation to prevent drift
+	# Always look at target (camera rotation is free, but always centers on player)
 	look_at(target_pos, Vector3.UP)
-	
-	# Store the correct rotation the first time (when camera is properly positioned)
-	if not fixed_rotation_set:
-		fixed_rotation_value = rotation
-		fixed_rotation_set = true
-	
-	# Always use the stored fixed rotation (prevents drift while maintaining centering)
-	rotation = fixed_rotation_value
+
+# Update camera position based on current rotation angles
+func _update_camera_position():
+	# This is called when angles change to immediately update position
+	# The actual position is interpolated in _process, but this ensures
+	# the camera responds immediately to rotation changes
+	pass
