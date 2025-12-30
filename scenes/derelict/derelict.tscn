@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3 uid="uid://player_scene"]
 
-[ext_resource type="Script" path="res://scripts/player/player.gd" id="1_player"]
+[ext_resource type="Script" path="res://scripts/derelict/derelict.gd" id="1_derelict"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 radius = 2.0
@@ -10,9 +10,9 @@ height = 4.0
 radius = 2.0
 height = 4.0
 
-[node name="Player" type="CharacterBody3D" groups=["player"]]
+[node name="Derelict" type="CharacterBody3D" groups=["player", "derelict"]]
 gravity_scale = 0.0
-script = ExtResource("1_player")
+script = ExtResource("1_derelict")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)

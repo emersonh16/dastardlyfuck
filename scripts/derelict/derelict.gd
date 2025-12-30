@@ -1,6 +1,7 @@
 extends CharacterBody3D
 
-# Player - moves through world coordinates, always at screen center
+# Derelict - The 4-legged walking tank (player character)
+# Moves through world coordinates, always at screen center
 
 # Movement speed (world units per second)
 const MOVE_SPEED = 50.0
@@ -15,7 +16,7 @@ func _ready():
 	# Start at origin
 	world_position = Vector3.ZERO
 	global_position = Vector3.ZERO
-	print("Player initialized at world position: ", world_position)
+	print("Derelict initialized at world position: ", world_position)
 	
 	# Find or create trail
 	trail = get_node_or_null("../PlayerTrail")
