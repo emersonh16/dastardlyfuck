@@ -3,8 +3,8 @@ extends Node3D
 # MiasmaRenderer - Renders miasma blocks using MultiMeshInstance3D
 
 # Constants (fallback if autoload not ready)
-const MIASMA_TILE_SIZE_X = 8.0
-const MIASMA_TILE_SIZE_Z = 8.0  # Changed to 8.0 for square appearance
+const MIASMA_TILE_SIZE_X = 4.0  # Smaller blocks for more granular fog
+const MIASMA_TILE_SIZE_Z = 4.0  # Smaller blocks for more granular fog
 const MIASMA_BLOCK_HEIGHT = 16.0
 
 var miasma_manager: Node

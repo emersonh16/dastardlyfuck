@@ -5,8 +5,8 @@ extends Node
 
 # Constants
 # For isometric squares: make X and Z equal so blocks appear square in isometric view
-const MIASMA_TILE_SIZE_X = 8.0
-const MIASMA_TILE_SIZE_Z = 8.0  # Changed from 4.0 to 8.0 for square appearance
+const MIASMA_TILE_SIZE_X = 4.0  # Smaller blocks for more granular fog
+const MIASMA_TILE_SIZE_Z = 4.0  # Smaller blocks for more granular fog
 const MIASMA_BLOCK_HEIGHT = 16.0
 
 # Block storage: Dictionary of Vector3i -> bool (present/absent)
