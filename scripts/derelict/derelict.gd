@@ -24,37 +24,56 @@ func _ready():
 		trail = get_node_or_null("../../PlayerTrail")
 
 func _physics_process(_delta):
-	# Get input - try both arrow keys and WASD
+	# Get input - WASD relative to camera (screen space)
 	var input_dir = Vector2.ZERO
 	
-	# Arrow keys
-	if Input.is_action_pressed("ui_right"):
-		input_dir.y -= 1
-	if Input.is_action_pressed("ui_left"):
-		input_dir.y += 1
-	if Input.is_action_pressed("ui_down"):
-		input_dir.x -= 1
-	if Input.is_action_pressed("ui_up"):
-		input_dir.x += 1
-	
-	# WASD keys - swap W and S
-	if Input.is_key_pressed(KEY_D):
-		input_dir.y -= 1  # D = right
-	if Input.is_key_pressed(KEY_A):
-		input_dir.y += 1  # A = left
-	if Input.is_key_pressed(KEY_S):
-		input_dir.x += 1  # S = down (swapped with W)
+	# WASD keys - screen space directions
 	if Input.is_key_pressed(KEY_W):
-		input_dir.x -= 1  # W = up (swapped with S)
+		input_dir.y -= 1  # W = up screen
+	if Input.is_key_pressed(KEY_S):
+		input_dir.y += 1  # S = down screen
+	if Input.is_key_pressed(KEY_D):
+		input_dir.x += 1  # D = right screen
+	if Input.is_key_pressed(KEY_A):
+		input_dir.x -= 1  # A = left screen
 	
-	# Screen-space to world-space for isometric
-	# Current: A→up, D→down, W→left, S→right
-	# Desired: W→up, S→down, D→right, A→left
-	# Try negating y: world_x = -y + x, world_z = y + x
-	var world_x = -input_dir.y + input_dir.x
-	var world_z = input_dir.y + input_dir.x
+	# Arrow keys (same as WASD)
+	if Input.is_action_pressed("ui_up"):
+		input_dir.y -= 1
+	if Input.is_action_pressed("ui_down"):
+		input_dir.y += 1
+	if Input.is_action_pressed("ui_right"):
+		input_dir.x += 1
+	if Input.is_action_pressed("ui_left"):
+		input_dir.x -= 1
 	
-	var move_dir = Vector3(world_x, 0, world_z)
+	# Convert screen-space input to world-space based on camera rotation
+	# Get camera to determine forward/right directions
+	var viewport = get_viewport()
+	var camera = viewport.get_camera_3d() if viewport else null
+	var move_dir: Vector3
+	
+	if camera:
+		# Get camera's forward and right vectors (projected to XZ plane)
+		var camera_basis = camera.global_transform.basis
+		var forward = -camera_basis.z  # Camera looks down -Z
+		var right = camera_basis.x     # Camera right is +X
+		
+		# Project to XZ plane (ignore Y component)
+		forward.y = 0
+		right.y = 0
+		forward = forward.normalized()
+		right = right.normalized()
+		
+		# Convert screen-space input to world-space
+		# input_dir.y = up/down screen, input_dir.x = left/right screen
+		move_dir = (forward * -input_dir.y) + (right * input_dir.x)
+		move_dir.y = 0  # Keep on ground plane
+	else:
+		# Fallback: use old isometric conversion if no camera
+		var world_x = -input_dir.y + input_dir.x
+		var world_z = input_dir.y + input_dir.x
+		move_dir = Vector3(world_x, 0, world_z)
 	
 	# Set velocity for CharacterBody3D
 	if move_dir.length() > 0:

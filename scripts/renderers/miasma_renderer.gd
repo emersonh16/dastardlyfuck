@@ -11,6 +11,7 @@ var material: StandardMaterial3D
 var _last_visible_bounds: Dictionary = {}
 var _last_wind_offset: Vector2 = Vector2.ZERO
 var _last_player_tile: Vector2i = Vector2i(0, 0)
+var _last_camera_rotation: Vector3 = Vector3.ZERO
 var wind_manager: Node = null
 const WIND_REBUILD_THRESHOLD: float = 1.0  # Rebuild when wind moves > 1 tile (was 0.1)
 const PLAYER_TILE_THRESHOLD: int = 2  # Rebuild when player moves > 2 tiles
@@ -52,6 +53,8 @@ func _ready():
 		if miasma_manager.viewport_tiles_x > 0 and camera:
 			# Wait one more frame to ensure camera is fully set up
 			await get_tree().process_frame
+			# Initialize camera rotation tracking
+			_last_camera_rotation = camera.rotation
 			break
 	
 	# Initial render
@@ -77,6 +80,15 @@ func _do_render_update():
 	var player_pos = miasma_manager.player_position
 	var player_ground = Vector3(player_pos.x, 0, player_pos.z)
 	
+	# Get viewport info (need camera to check rotation)
+	var viewport = get_viewport()
+	if not viewport:
+		return
+	
+	var camera = viewport.get_camera_3d()
+	if not camera:
+		return
+	
 	# Quick early exit checks before expensive calculations
 	var tile_size = miasma_manager.get_tile_size()
 	var current_wind_offset = Vector2(miasma_manager.wind_offset_x, miasma_manager.wind_offset_z)
@@ -89,19 +101,13 @@ func _do_render_update():
 	var player_tile_delta = current_player_tile - _last_player_tile
 	var player_moved = abs(player_tile_delta.x) >= PLAYER_TILE_THRESHOLD or abs(player_tile_delta.y) >= PLAYER_TILE_THRESHOLD
 	
+	# Check if camera rotated (camera rotation changes visible area)
+	var camera_rotated = camera.rotation.distance_to(_last_camera_rotation) > 0.01  # Small threshold for rotation
+	
 	# Early exit: if nothing significant changed, just update position
 	# (Wind advection is smooth, so small movements don't need mesh rebuild)
-	if not wind_moved and not player_moved:
+	if not wind_moved and not player_moved and not camera_rotated:
 		global_position = player_ground
-		return
-	
-	# Get viewport info (only do expensive calculations if we need to rebuild)
-	var viewport = get_viewport()
-	if not viewport:
-		return
-	
-	var camera = viewport.get_camera_3d()
-	if not camera:
 		return
 	
 	# Calculate visible world bounds by projecting screen corners to ground plane
@@ -173,6 +179,7 @@ func _do_render_update():
 	_last_visible_bounds = current_bounds
 	_last_wind_offset = current_wind_offset
 	_last_player_tile = current_player_tile
+	_last_camera_rotation = camera.rotation
 	
 	# Calculate tile bounds
 	var min_tile_x = int(min_x / tile_size)
