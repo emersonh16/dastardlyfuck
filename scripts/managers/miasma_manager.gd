@@ -210,15 +210,17 @@ func _process_regrowth():
 	var scanned = 0
 	
 	# Scan frontier for regrowth candidates
-	# Convert to array to avoid modification during iteration
+	# OPTIMIZATION: Convert to array once and cache lookups
 	var frontier_keys = frontier.keys()
 	for tile_pos in frontier_keys:
 		if budget <= 0 or scanned >= MAX_REGROW_SCAN_PER_FRAME:
 			break
 		scanned += 1
 		
-		# Check if tile is still cleared
-		if not cleared_tiles.has(tile_pos):
+		# OPTIMIZATION: Get time_cleared once (cache the lookup)
+		var time_cleared = cleared_tiles.get(tile_pos)
+		if time_cleared == null:
+			# Tile no longer cleared - remove from frontier
 			frontier.erase(tile_pos)
 			continue
 		
@@ -234,13 +236,12 @@ func _process_regrowth():
 		if tx < reg_left or tx >= reg_right or tz < reg_top or tz >= reg_bottom:
 			continue
 		
-		# Check if still on boundary
+		# Check if still on boundary (only if in regrow area)
 		if not _is_boundary(tile_pos):
 			frontier.erase(tile_pos)
 			continue
 		
-		# Check if enough time has passed
-		var time_cleared = cleared_tiles[tile_pos]
+		# Check if enough time has passed (use cached time_cleared)
 		if game_time - time_cleared < REGROW_DELAY:
 			continue
 		

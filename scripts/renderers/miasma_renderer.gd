@@ -150,26 +150,49 @@ func _do_render_update():
 	var min_tile_z = int(min_z / tile_size)
 	var max_tile_z = int(max_z / tile_size) + 1
 	
+	# OPTIMIZATION: Get all cleared tiles in area ONCE (batch lookup)
+	# This avoids thousands of individual dictionary lookups
+	var half_x = (max_tile_x - min_tile_x) / 2
+	var half_z = (max_tile_z - min_tile_z) / 2
+	var center_tile_x = (min_tile_x + max_tile_x) / 2
+	var center_tile_z = (min_tile_z + max_tile_z) / 2
+	var cleared_in_area = miasma_manager.get_cleared_tiles_in_area(center_tile_x, center_tile_z, half_x + 1, half_z + 1)
+	
+	# Convert to Set for O(1) lookup (much faster than calling is_cleared() thousands of times)
+	var cleared_set = {}
+	for tile_pos in cleared_in_area.keys():
+		cleared_set[tile_pos] = true
+	
 	# Build mesh: continuous sheet with holes (tiles that are cleared)
 	# Build a rectangle centered on player, covering viewport
 	# For each tile, check if it's cleared in WORLD space
 	
+	# Pre-allocate arrays with estimated size (reduces reallocations)
+	var tile_count = (max_tile_x - min_tile_x + 1) * (max_tile_z - min_tile_z + 1)
+	var estimated_vertices = tile_count * 4  # 4 vertices per tile
+	var estimated_indices = tile_count * 6  # 6 indices per tile (2 triangles)
+	
 	var vertices = PackedVector3Array()
+	vertices.resize(estimated_vertices)
 	var indices = PackedInt32Array()
+	indices.resize(estimated_indices)
+	
 	var sheet_thickness = 0.1
 	var y_pos = sheet_thickness / 2.0
 	
 	var vertex_index = 0
+	var index_index = 0
 	var tiles_rendered = 0
 	
 	# Build mesh tile by tile, skipping cleared tiles
 	# Only render tiles that are actually visible on screen (within projected bounds)
-	# For each visible tile, check if it's cleared in WORLD space
+	# For each visible tile, check if it's cleared in WORLD space (using fast Set lookup)
 	
 	for world_tile_x in range(min_tile_x, max_tile_x + 1):
 		for world_tile_z in range(min_tile_z, max_tile_z + 1):
-			# Check if this world position is cleared (holes stay in world space)
-			if miasma_manager.is_cleared(world_tile_x, world_tile_z):
+			# Fast O(1) lookup using Set instead of calling is_cleared()
+			var tile_pos = Vector2i(world_tile_x, world_tile_z)
+			if cleared_set.has(tile_pos):
 				continue  # Skip cleared tiles (holes)
 			
 			# Calculate world position of this tile
@@ -187,21 +210,26 @@ func _do_render_update():
 			var v3 = Vector3(local_x, y_pos, local_z + tile_size)
 			
 			var base = vertex_index
-			vertices.append(v0)
-			vertices.append(v1)
-			vertices.append(v2)
-			vertices.append(v3)
+			vertices[vertex_index + 0] = v0
+			vertices[vertex_index + 1] = v1
+			vertices[vertex_index + 2] = v2
+			vertices[vertex_index + 3] = v3
 			
 			# Two triangles per tile
-			indices.append(base + 0)
-			indices.append(base + 1)
-			indices.append(base + 2)
-			indices.append(base + 0)
-			indices.append(base + 2)
-			indices.append(base + 3)
+			indices[index_index + 0] = base + 0
+			indices[index_index + 1] = base + 1
+			indices[index_index + 2] = base + 2
+			indices[index_index + 3] = base + 0
+			indices[index_index + 4] = base + 2
+			indices[index_index + 5] = base + 3
 			
 			vertex_index += 4
+			index_index += 6
 			tiles_rendered += 1
+	
+	# Resize arrays to actual size (remove unused pre-allocated space)
+	vertices.resize(vertex_index)
+	indices.resize(index_index)
 	
 	# Create mesh
 	var array_mesh = ArrayMesh.new()
