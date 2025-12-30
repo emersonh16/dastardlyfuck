@@ -5,12 +5,13 @@ extends Node
 
 var beam_manager: Node = null
 
-# Mode order for cycling (OFF → BUBBLE_MIN → BUBBLE_MAX → CONE → LASER)
+# Mode order for cycling (OFF → BUBBLE_MIN → BUBBLE_MAX → CONE_MIN → CONE_MAX → LASER)
 var mode_order = [
 	BeamManager.BeamMode.OFF,
 	BeamManager.BeamMode.BUBBLE_MIN,
 	BeamManager.BeamMode.BUBBLE_MAX,
-	BeamManager.BeamMode.CONE,
+	BeamManager.BeamMode.CONE_MIN,
+	BeamManager.BeamMode.CONE_MAX,
 	BeamManager.BeamMode.LASER
 ]
 
@@ -27,6 +28,7 @@ func _input(event):
 		return
 	
 	# Mouse wheel - cycle through modes
+	# Note: Mouse wheel events use factor, not pressed
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_cycle_mode(1)  # Forward
@@ -45,8 +47,10 @@ func _input(event):
 			KEY_3:
 				beam_manager.set_mode(BeamManager.BeamMode.BUBBLE_MAX)
 			KEY_4:
-				beam_manager.set_mode(BeamManager.BeamMode.CONE)
+				beam_manager.set_mode(BeamManager.BeamMode.CONE_MIN)
 			KEY_5:
+				beam_manager.set_mode(BeamManager.BeamMode.CONE_MAX)
+			KEY_6:
 				beam_manager.set_mode(BeamManager.BeamMode.LASER)
 
 func _cycle_mode(direction: int):

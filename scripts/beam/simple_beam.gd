@@ -51,7 +51,7 @@ func _process_clear():
 		BeamManager.BeamMode.BUBBLE_MIN, BeamManager.BeamMode.BUBBLE_MAX:
 			# Continuously clear around player (bubble modes)
 			_clear_bubble(derelict_pos_ground)
-		BeamManager.BeamMode.CONE:
+		BeamManager.BeamMode.CONE_MIN, BeamManager.BeamMode.CONE_MAX:
 			# Continuously clear cone from player toward mouse
 			var mouse_pos = _get_mouse_world_position()
 			if mouse_pos != Vector3.ZERO:
@@ -65,14 +65,18 @@ func _process_clear():
 		BeamManager.BeamMode.LASER:
 			# Continuously clear laser from player toward mouse
 			var mouse_pos = _get_mouse_world_position()
+			var direction: Vector3
 			if mouse_pos != Vector3.ZERO:
-				var direction = (mouse_pos - derelict_pos_ground)
+				direction = (mouse_pos - derelict_pos_ground)
 				# If direction is too small, use a default direction (forward)
 				if direction.length() < 0.1:
 					direction = Vector3(1, 0, 0)  # Default forward direction
 				else:
 					direction = direction.normalized()
-				_clear_laser(derelict_pos_ground, direction)
+			else:
+				# Mouse position unavailable, use default forward direction
+				direction = Vector3(1, 0, 0)
+			_clear_laser(derelict_pos_ground, direction)
 		BeamManager.BeamMode.OFF:
 			# No clearing
 			pass

@@ -126,7 +126,7 @@ func _process(_delta):
 	
 	# Rotate cone/laser toward mouse (only Y rotation - keep it flat/2D)
 	var current_mode = beam_manager.get_mode()
-	if current_mode == BeamManager.BeamMode.CONE or current_mode == BeamManager.BeamMode.LASER:
+	if current_mode == BeamManager.BeamMode.CONE_MIN or current_mode == BeamManager.BeamMode.CONE_MAX or current_mode == BeamManager.BeamMode.LASER:
 		var mouse_pos = _get_mouse_world_position()
 		if mouse_pos != Vector3.ZERO:
 			var direction = (mouse_pos - ground_pos)
@@ -149,7 +149,7 @@ func _on_beam_mode_changed(mode):
 			beam_mesh_instance.rotation.y = 0  # No rotation for bubble
 			beam_mesh_instance.material_override = beam_material  # Use translucent material
 			beam_mesh_instance.visible = true
-		BeamManager.BeamMode.CONE:
+		BeamManager.BeamMode.CONE_MIN, BeamManager.BeamMode.CONE_MAX:
 			# Create cone visual
 			_update_cone_visual(params.get("length", 64.0), params.get("angle", 32.0))
 			beam_mesh_instance.material_override = beam_material  # Use translucent material

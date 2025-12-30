@@ -8,19 +8,22 @@ enum BeamMode {
 	OFF,
 	BUBBLE_MIN,
 	BUBBLE_MAX,
-	CONE,
+	CONE_MIN,
+	CONE_MAX,
 	LASER
 }
 
 # Current state
-var current_mode: BeamMode = BeamMode.BUBBLE_MIN
+var current_mode: BeamMode = BeamMode.OFF  # Start at OFF (first in scroll order)
 var beam_level: int = 1
 
 # Beam parameters (from JS design)
 const BUBBLE_MIN_RADIUS = 16.0  # World units (halved from original 48.0)
 const BUBBLE_MAX_RADIUS = 32.0  # World units (halved from original 96.0)
-const CONE_LENGTH = 64.0
-const CONE_ANGLE_DEG = 32.0
+const CONE_MIN_LENGTH = 48.0
+const CONE_MIN_ANGLE_DEG = 24.0
+const CONE_MAX_LENGTH = 80.0
+const CONE_MAX_ANGLE_DEG = 40.0
 const LASER_LENGTH = 128.0
 const LASER_THICKNESS = 4.0
 
@@ -118,13 +121,20 @@ func clear_laser(origin: Vector3, direction: Vector3, length: float, thickness: 
 		radius = 2.0
 	
 	# Always clear at least at origin
-	for i in range(num_stamps):
-		var t = float(i) / float(num_stamps - 1) if num_stamps > 1 else 0.0
-		var distance = t * length
-		var stamp_pos = origin + dir * distance
-		
-		var cleared = miasma_manager.clear_area(stamp_pos, radius)
+	# Fix: Ensure we always clear, even if num_stamps is 1
+	if num_stamps == 1:
+		# Single stamp at origin
+		var cleared = miasma_manager.clear_area(origin, radius)
 		total_cleared += cleared
+	else:
+		# Multiple stamps along the path
+		for i in range(num_stamps):
+			var t = float(i) / float(num_stamps - 1)
+			var distance = t * length
+			var stamp_pos = origin + dir * distance
+			
+			var cleared = miasma_manager.clear_area(stamp_pos, radius)
+			total_cleared += cleared
 	
 	if total_cleared > 0:
 		beam_fired.emit(origin, length)
@@ -138,8 +148,10 @@ func get_clearing_params() -> Dictionary:
 			return {"radius": BUBBLE_MIN_RADIUS, "shape": "circle"}
 		BeamMode.BUBBLE_MAX:
 			return {"radius": BUBBLE_MAX_RADIUS, "shape": "circle"}
-		BeamMode.CONE:
-			return {"length": CONE_LENGTH, "angle": CONE_ANGLE_DEG, "shape": "cone"}
+		BeamMode.CONE_MIN:
+			return {"length": CONE_MIN_LENGTH, "angle": CONE_MIN_ANGLE_DEG, "shape": "cone"}
+		BeamMode.CONE_MAX:
+			return {"length": CONE_MAX_LENGTH, "angle": CONE_MAX_ANGLE_DEG, "shape": "cone"}
 		BeamMode.LASER:
 			return {"length": LASER_LENGTH, "thickness": LASER_THICKNESS, "shape": "line"}
 		_:
