@@ -54,5 +54,8 @@ func _clear_bubble(world_pos: Vector3):
 	var params = beam_manager.get_clearing_params()
 	var radius = params.get("radius", 48.0)
 	
+	# DEBUG: Print clearing position and radius
+	print("CLEARING: pos=", world_pos, " radius=", radius)
+	
 	# Use BeamManager to clear (it will call MiasmaManager)
 	beam_manager.clear_at_position(world_pos, radius)

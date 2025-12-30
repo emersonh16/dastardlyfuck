@@ -40,26 +40,22 @@ func _ready():
 	print("BeamRenderer initialized")
 
 func _create_beam_visual():
-	# Create a circle that matches the clearing hitbox exactly
-	# The clearing is a perfect circle in world space (XZ plane)
-	# For isometric view, we need to show it as an ellipse that represents that circle
+	# Architecture: Custom Flat Circle Mesh (Option 3)
+	# - Create a flat circle mesh directly on XZ plane (Y=0)
+	# - No rotation needed - already flat!
+	# - Hitbox: Circle in world space (XZ plane)
+	# - Visual: Circle in world space (XZ plane)
+	# - Result: Circle appears as ellipse in isometric view (natural projection)
 	
-	# Use CylinderMesh for a perfect circle, positioned on XZ plane
-	var cylinder_mesh = CylinderMesh.new()
-	cylinder_mesh.top_radius = 48.0  # Will be updated based on mode
-	cylinder_mesh.bottom_radius = 48.0
-	cylinder_mesh.height = 0.1  # Very thin - essentially a flat disc
-	cylinder_mesh.radial_segments = 64  # High segments for smooth circle
+	# Create custom flat circle mesh
+	# Initial radius will be updated based on mode via BeamManager
+	var circle_mesh = _create_circle_mesh(48.0)
 	
 	beam_mesh_instance = MeshInstance3D.new()
-	beam_mesh_instance.mesh = cylinder_mesh
+	beam_mesh_instance.mesh = circle_mesh
 	
-	# Rotate to lie flat on XZ plane and align with isometric view
-	# CylinderMesh is vertical (along Y) by default
-	# Step 1: Rotate 90° around X to make it horizontal (flat on XZ plane)
-	# Step 2: Rotate +45° around Y to compensate for camera's 45° azimuth (counter-clockwise)
-	# This should make the ellipse appear aligned (not rotated) in isometric view
-	beam_mesh_instance.rotation_degrees = Vector3(90, 45, 0)  # Flat on XZ, compensate camera
+	# NO ROTATION NEEDED - mesh is already flat on XZ plane!
+	beam_mesh_instance.rotation_degrees = Vector3(0, 0, 0)  # Already flat, no rotation
 	beam_mesh_instance.scale = Vector3(1.0, 1.0, 1.0)  # No scaling - show actual circle
 	
 	beam_material = StandardMaterial3D.new()
@@ -81,13 +77,49 @@ func _create_beam_visual():
 	
 	add_child(beam_mesh_instance)
 
+func _create_circle_mesh(radius: float) -> ArrayMesh:
+	# Create a flat circle mesh on XZ plane (Y=0)
+	# This is naturally flat, so no rotation needed!
+	
+	var segments = 64  # High segments for smooth circle
+	var vertices = PackedVector3Array()
+	var indices = PackedInt32Array()
+	
+	# Center vertex (at origin, Y=0)
+	vertices.append(Vector3(0, 0, 0))
+	
+	# Generate circle vertices on XZ plane
+	for i in range(segments + 1):
+		var angle = (i * 2.0 * PI) / segments
+		var x = cos(angle) * radius
+		var z = sin(angle) * radius
+		vertices.append(Vector3(x, 0, z))
+	
+	# Create triangles from center to edge
+	for i in range(segments):
+		indices.append(0)  # Center vertex
+		indices.append(i + 1)  # Current edge vertex
+		indices.append(i + 2 if i < segments else 1)  # Next edge vertex (wrap around)
+	
+	# Create the mesh
+	var array_mesh = ArrayMesh.new()
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	
+	return array_mesh
+
 func _process(_delta):
 	if not derelict or not beam_mesh_instance:
 		return
 	
-	# Follow derelict position (ground level)
+	# Follow derelict position (ground level) - EXACTLY match clearing position
+	# This must match SimpleBeam._clear_bubble() position calculation
 	var derelict_pos = derelict.global_position
-	var ground_pos = Vector3(derelict_pos.x, 0, derelict_pos.z)
+	var ground_pos = Vector3(derelict_pos.x, 0, derelict_pos.z)  # Ground level - matches clearing
 	global_position = ground_pos
 	
 	# Position beam well above ground level
@@ -95,12 +127,9 @@ func _process(_delta):
 	# This ensures the ellipse doesn't go below ground and is visible above the derelict
 	beam_mesh_instance.position = Vector3(0, 2.0, 0)
 	
-	# DIAGNOSTIC: Print actual rotation values (only once per second to avoid spam)
+	# DEBUG: Print visual position and radius (only once per second to avoid spam)
 	if Engine.get_process_frames() % 60 == 0:
-		print("Beam rotation (local): ", beam_mesh_instance.rotation_degrees)
-		print("Beam rotation (global): ", beam_mesh_instance.global_rotation_degrees)
-		print("Beam parent rotation: ", rotation_degrees)
-		print("Beam scale: ", beam_mesh_instance.scale)
+		print("VISUAL: pos=", ground_pos, " radius=", current_radius, " mesh_pos=", beam_mesh_instance.position, " rotation=", beam_mesh_instance.rotation_degrees)
 
 func _on_beam_mode_changed(mode):
 	if not beam_mesh_instance:
@@ -125,19 +154,23 @@ func _on_beam_mode_changed(mode):
 			beam_mesh_instance.visible = false
 
 func _update_bubble_visual(radius: float):
-	if not beam_mesh_instance or not beam_mesh_instance.mesh:
+	# Architecture: Single Source of Truth
+	# - BeamManager.get_clearing_radius() defines the hitbox radius
+	# - BeamRenderer uses that exact radius for visual
+	# - Both are circles in world space, so they match exactly
+	# - Isometric projection makes both appear as ellipses (natural, correct)
+	
+	if not beam_mesh_instance:
 		return
 	
-	# Update cylinder mesh radius - use exact radius from BeamManager
-	# This ensures visual matches hitbox exactly
-	var cylinder = beam_mesh_instance.mesh as CylinderMesh
-	if cylinder:
-		cylinder.top_radius = radius
-		cylinder.bottom_radius = radius
+	# DEBUG: Print when visual radius is updated
+	print("VISUAL UPDATE: Setting radius to ", radius)
 	
-	# Verify visual matches hitbox: visual shows circle of radius 'radius'
-	# The circle is pre-stretched to appear circular in isometric view
-	# So the visual correctly represents the clearing circle in isometric view
+	# Recreate circle mesh with new radius
+	# ArrayMesh doesn't support dynamic radius updates, so we recreate it
+	var new_circle_mesh = _create_circle_mesh(radius)
+	beam_mesh_instance.mesh = new_circle_mesh
+	current_radius = radius
 
 func _on_beam_energy_changed(energy: float):
 	if not beam_material:
