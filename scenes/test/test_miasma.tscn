@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://dt842yhadvp80"]
+[gd_scene load_steps=10 format=3 uid="uid://dt842yhadvp80"]
 
 [ext_resource type="Script" uid="uid://lpr3v48wqvwr" path="res://scripts/camera/camera_follower.gd" id="1_camera"]
 [ext_resource type="Script" uid="uid://daqe1g57yntfx" path="res://scripts/renderers/miasma_renderer.gd" id="2_renderer"]
@@ -8,7 +8,7 @@
 [ext_resource type="Script" uid="uid://cnf2j1hueyofm" path="res://scripts/beam/simple_beam.gd" id="6_beam"]
 [ext_resource type="Script" uid="uid://brgv3ylce5hkd" path="res://scripts/world/ground_renderer.gd" id="7_ground"]
 [ext_resource type="Script" uid="uid://c45d53fbcw6a" path="res://scripts/renderers/beam_renderer.gd" id="8_beam_renderer"]
-[ext_resource type="Script" path="res://scripts/beam/beam_input.gd" id="9_beam_input"]
+[ext_resource type="Script" uid="uid://dhduvjpi8ass1" path="res://scripts/beam/beam_input.gd" id="9_beam_input"]
 
 [node name="TestMiasma" type="Node3D"]
 
