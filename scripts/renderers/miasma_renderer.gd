@@ -16,6 +16,7 @@ var material: StandardMaterial3D
 var _pending_update = false
 var _update_timer = 0.0
 const UPDATE_INTERVAL = 0.15  # Update mesh max ~6.7 times per second (reduced for smaller blocks)
+var _initial_render_done = false  # Track if initial render has completed
 
 func _ready():
 	# Wait for autoload to be ready
@@ -65,12 +66,27 @@ func _ready():
 	mesh_instance.multimesh = multimesh
 	mesh_instance.material_override = material
 	
-	# Connect to manager signals
+	# Connect to manager signals FIRST (before manager initializes)
+	# This ensures we catch the initial blocks_changed signal
 	if miasma_manager:
 		miasma_manager.blocks_changed.connect(_on_blocks_changed)
-		# Wait a frame for manager to initialize
+		
+		# Wait for manager to initialize and add blocks
+		# The manager uses call_deferred, so we need to wait
+		for i in range(10):  # Wait up to 10 frames
+			await get_tree().process_frame
+			# Check if blocks have been added
+			if miasma_manager.blocks.size() > 0:
+				break
+		
+		# Wait one more frame to ensure signal has been processed
 		await get_tree().process_frame
-		_do_render_update()  # Initial render (bypass throttle)
+		
+		# Final safety check - render if we have blocks but haven't rendered yet
+		# This catches the case where signal fired before we connected
+		if not _initial_render_done and miasma_manager.blocks.size() > 0:
+			_initial_render_done = true
+			_do_render_update()
 	else:
 		# Don't error - render test blocks manually
 		print("WARNING: MiasmaManager not found - rendering test blocks")
@@ -103,8 +119,16 @@ func _render_test_blocks():
 		mesh_instance.multimesh.set_instance_transform(index, block_transform)
 		index += 1
 
+
 func _on_blocks_changed():
-	# Throttle updates for performance
+	# If this is the first signal after initialization, render immediately (no throttle)
+	if not _initial_render_done:
+		_pending_update = false
+		_update_timer = 0.0
+		_do_render_update()
+		return
+	
+	# Throttle updates for performance (after initial render)
 	_pending_update = true
 
 func _process(delta):
@@ -120,27 +144,53 @@ func _do_render_update():
 		return
 	
 	var blocks = miasma_manager.get_all_blocks()
-	var block_count = blocks.size()
 	
-	if block_count == 0:
+	if blocks.size() == 0:
 		mesh_instance.multimesh.instance_count = 0
 		return
 	
-	# Resize multimesh if needed
-	if mesh_instance.multimesh.instance_count != block_count:
-		mesh_instance.multimesh.instance_count = block_count
+	# First pass: collect all valid blocks (that are actually present)
+	# Use an array to ensure consistent ordering
+	var valid_blocks = []
+	var total_blocks = blocks.size()
 	
-	# Set transforms for each block
-	var index = 0
 	for tile_pos in blocks.keys():
-		if not blocks[tile_pos]:  # Skip absent blocks
-			continue
+		# Check if block is present (true)
+		var block_value = blocks.get(tile_pos)
+		if block_value == true:
+			valid_blocks.append(tile_pos)
+	
+	var valid_count = valid_blocks.size()
+	
+	# Debug: Log block counts on first render
+	if not _initial_render_done:
+		print("MiasmaRenderer: Total blocks in dict: ", total_blocks, " Valid blocks: ", valid_count)
+		if valid_count != total_blocks:
+			print("WARNING: Some blocks are not valid! This might cause rendering issues.")
+		_initial_render_done = true
+	
+	if valid_count == 0:
+		mesh_instance.multimesh.instance_count = 0
+		return
+	
+	# Set instance count to exact number of valid blocks
+	# IMPORTANT: Reset to 0 first on initial render to force full refresh (fixes checkerboard)
+	var multimesh = mesh_instance.multimesh
+	if not _initial_render_done:
+		# On first render, reset to 0 then set to full count to force complete initialization
+		multimesh.instance_count = 0
+	multimesh.instance_count = valid_count
+	
+	# Second pass: set transforms for all valid blocks
+	var tile_x = miasma_manager.MIASMA_TILE_SIZE_X if miasma_manager else MIASMA_TILE_SIZE_X
+	var tile_z = miasma_manager.MIASMA_TILE_SIZE_Z if miasma_manager else MIASMA_TILE_SIZE_Z
+	var sheet_thickness = 0.1  # Thin 2D sheet
+	
+	# Set all transforms - ensure every instance gets a valid transform
+	for index in range(valid_count):
+		var tile_pos = valid_blocks[index]
 		
 		# Convert tile position to world position (2D sheet on ground)
-		var tile_x = miasma_manager.MIASMA_TILE_SIZE_X if miasma_manager else MIASMA_TILE_SIZE_X
-		var tile_z = miasma_manager.MIASMA_TILE_SIZE_Z if miasma_manager else MIASMA_TILE_SIZE_Z
-		var sheet_thickness = 0.1  # Thin 2D sheet
-		
 		var world_x = tile_pos.x * tile_x
 		var world_z = tile_pos.y * tile_z
 		var world_y = sheet_thickness / 2.0  # Flat on ground (slightly above to avoid z-fighting)
@@ -150,9 +200,12 @@ func _do_render_update():
 			Vector3(world_x, world_y, world_z)
 		)
 		
-		mesh_instance.multimesh.set_instance_transform(index, block_transform)
-		index += 1
-		
-	# Update instance count to actual rendered blocks
-	mesh_instance.multimesh.instance_count = index
+		multimesh.set_instance_transform(index, block_transform)
+	
+	# Ensure mesh instance is visible
+	mesh_instance.visible = true
+	
+	# Debug: Verify we set all transforms
+	if not _initial_render_done:
+		print("MiasmaRenderer: Set ", valid_count, " transforms in multimesh (instance_count: ", multimesh.instance_count, ")")
 	# Removed debug prints for performance

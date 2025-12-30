@@ -98,9 +98,9 @@ func fill_area_around_player():
 				blocks[tile_pos] = true
 				added += 1
 	
-	# Only emit signal if blocks were actually added (performance)
-	if added > 0:
-		blocks_changed.emit()
+	# Always emit signal on initial fill (even if 0 added) so renderer knows to update
+	# This ensures renderer gets the full block set on first load
+	blocks_changed.emit()
 
 # Update player position (miasma follows player)
 func update_player_position(new_pos: Vector3):
