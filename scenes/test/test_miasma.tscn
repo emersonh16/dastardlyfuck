@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://dt842yhadvp80"]
+[gd_scene load_steps=8 format=3 uid="uid://dt842yhadvp80"]
 
 [ext_resource type="Script" path="res://scripts/camera/camera_follower.gd" id="1_camera"]
 [ext_resource type="Script" uid="uid://b6b412ej2ghav" path="res://scripts/miasma/miasma_renderer.gd" id="2_renderer"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://player_scene" path="res://scenes/player/player.tscn" id="4_player"]
 [ext_resource type="Script" path="res://scripts/debug/player_trail.gd" id="5_trail"]
 [ext_resource type="Script" path="res://scripts/beam/simple_beam.gd" id="6_beam"]
+[ext_resource type="Script" path="res://scripts/world/ground_renderer.gd" id="7_ground"]
 
 [node name="TestMiasma" type="Node3D"]
 
@@ -18,6 +19,9 @@ script = ExtResource("5_trail")
 projection = 1
 size = 200.0
 script = ExtResource("1_camera")
+
+[node name="GroundRenderer" type="Node3D" parent="."]
+script = ExtResource("7_ground")
 
 [node name="MiasmaRenderer" type="Node3D" parent="."]
 script = ExtResource("2_renderer")

@@ -22,7 +22,7 @@ func _ready():
 	if not trail:
 		trail = get_node_or_null("../../PlayerTrail")
 
-func _physics_process(delta):
+func _physics_process(_delta):
 	# Get input - try both arrow keys and WASD
 	var input_dir = Vector2.ZERO
 	

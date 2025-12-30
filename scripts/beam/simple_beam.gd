@@ -104,5 +104,5 @@ func _clear_bubble(world_pos: Vector3):
 	
 	# Clear circular area around player (bubble mode)
 	# Radius matches visual beam exactly
-	var cleared = miasma_manager.clear_area(world_pos, BUBBLE_RADIUS)
+	var _cleared = miasma_manager.clear_area(world_pos, BUBBLE_RADIUS)
 	# Note: cleared count is logged in manager if needed
