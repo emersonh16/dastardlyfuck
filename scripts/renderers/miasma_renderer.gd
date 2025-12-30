@@ -7,15 +7,8 @@ var miasma_manager: Node
 var mesh_instance: MeshInstance3D
 var material: StandardMaterial3D
 
-# Performance: throttle render updates
-var _pending_update = false
-var _update_timer = 0.0
-const UPDATE_INTERVAL = 0.1  # Update mesh max 10 times per second
-var _initial_render_done = false
-
-# Track player position to detect movement
-var _last_player_tile: Vector2i = Vector2i(0, 0)
-const PLAYER_TILE_UPDATE_THRESHOLD = 2  # Update when player moves this many tiles
+# Track visible bounds to only rebuild when needed
+var _last_visible_bounds: Dictionary = {}
 
 func _ready():
 	await get_tree().process_frame
@@ -53,46 +46,14 @@ func _ready():
 	
 	# Initial render
 	_do_render_update()
-	
-	# Force a second render after a short delay to catch any initialization issues
-	await get_tree().create_timer(0.1).timeout
-	_do_render_update()
 
 func _on_cleared_changed():
-	# Throttle updates
-	_pending_update = true
-	# First update renders immediately
-	if not _initial_render_done:
-		_initial_render_done = true
-		_pending_update = false
-		_update_timer = 0.0
-		_do_render_update()
+	# Trigger immediate update when miasma changes
+	_do_render_update()
 
-func _process(delta):
-	# Always update position to follow player smoothly (no stuttering)
-	var player_pos = miasma_manager.player_position
-	var player_ground = Vector3(player_pos.x, 0, player_pos.z)
-	global_position = player_ground
-	
-	# Check if player moved significantly (need to rebuild mesh for new visible area)
-	var tile_size = miasma_manager.get_tile_size()
-	var current_tile_x = int(player_pos.x / tile_size)
-	var current_tile_z = int(player_pos.z / tile_size)
-	var current_tile = Vector2i(current_tile_x, current_tile_z)
-	
-	# If player moved to a different tile area, trigger update
-	var tile_delta = current_tile - _last_player_tile
-	if abs(tile_delta.x) >= PLAYER_TILE_UPDATE_THRESHOLD or abs(tile_delta.y) >= PLAYER_TILE_UPDATE_THRESHOLD:
-		_last_player_tile = current_tile
-		_pending_update = true  # Trigger mesh rebuild for new area
-	
-	# Throttle mesh rebuilds
-	if _pending_update:
-		_update_timer += delta
-		if _update_timer >= UPDATE_INTERVAL:
-			_update_timer = 0.0
-			_pending_update = false
-			_do_render_update()
+func _process(_delta):
+	# Update every frame for smooth movement (tiles snap to grid, but update smoothly)
+	_do_render_update()
 
 func _do_render_update():
 	if not miasma_manager or not mesh_instance:
@@ -174,6 +135,15 @@ func _do_render_update():
 		min_z -= padding
 		max_z += padding
 	
+	# Check if bounds changed (only rebuild if needed)
+	var current_bounds = {"min_x": min_x, "max_x": max_x, "min_z": min_z, "max_z": max_z}
+	if current_bounds.hash() == _last_visible_bounds.hash():
+		# Just update position, don't rebuild mesh
+		global_position = player_ground
+		return
+	
+	_last_visible_bounds = current_bounds
+	
 	# Calculate tile bounds
 	var min_tile_x = int(min_x / tile_size)
 	var max_tile_x = int(max_x / tile_size) + 1
@@ -247,6 +217,3 @@ func _do_render_update():
 	
 	# Position at player position (ground level) - sheet follows player
 	global_position = player_ground
-	
-	if not _initial_render_done:
-		print("MiasmaRenderer: Rendered ", tiles_rendered, " fog tiles (sheet follows player at: ", player_ground, ")")
