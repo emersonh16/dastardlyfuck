@@ -13,6 +13,10 @@ var _update_timer = 0.0
 const UPDATE_INTERVAL = 0.1  # Update mesh max 10 times per second
 var _initial_render_done = false
 
+# Track player position to detect movement
+var _last_player_tile: Vector2i = Vector2i(0, 0)
+const PLAYER_TILE_UPDATE_THRESHOLD = 2  # Update when player moves this many tiles
+
 func _ready():
 	await get_tree().process_frame
 	
@@ -38,13 +42,20 @@ func _ready():
 	# Connect to manager signals
 	miasma_manager.cleared_changed.connect(_on_cleared_changed)
 	
-	# Wait for manager to initialize
-	for i in range(5):
+	# Wait for manager and camera to initialize
+	for i in range(10):
 		await get_tree().process_frame
-		if miasma_manager.viewport_tiles_x > 0:
+		var camera = get_viewport().get_camera_3d()
+		if miasma_manager.viewport_tiles_x > 0 and camera:
+			# Wait one more frame to ensure camera is fully set up
+			await get_tree().process_frame
 			break
 	
 	# Initial render
+	_do_render_update()
+	
+	# Force a second render after a short delay to catch any initialization issues
+	await get_tree().create_timer(0.1).timeout
 	_do_render_update()
 
 func _on_cleared_changed():
@@ -62,6 +73,18 @@ func _process(delta):
 	var player_pos = miasma_manager.player_position
 	var player_ground = Vector3(player_pos.x, 0, player_pos.z)
 	global_position = player_ground
+	
+	# Check if player moved significantly (need to rebuild mesh for new visible area)
+	var tile_size = miasma_manager.get_tile_size()
+	var current_tile_x = int(player_pos.x / tile_size)
+	var current_tile_z = int(player_pos.z / tile_size)
+	var current_tile = Vector2i(current_tile_x, current_tile_z)
+	
+	# If player moved to a different tile area, trigger update
+	var tile_delta = current_tile - _last_player_tile
+	if abs(tile_delta.x) >= PLAYER_TILE_UPDATE_THRESHOLD or abs(tile_delta.y) >= PLAYER_TILE_UPDATE_THRESHOLD:
+		_last_player_tile = current_tile
+		_pending_update = true  # Trigger mesh rebuild for new area
 	
 	# Throttle mesh rebuilds
 	if _pending_update:
@@ -112,26 +135,44 @@ func _do_render_update():
 				world_corners.append(Vector3(world_pos.x, 0, world_pos.z))
 	
 	# Find bounding box of visible world area
-	if world_corners.size() == 0:
-		return  # Can't determine visible area
+	var min_x: float
+	var max_x: float
+	var min_z: float
+	var max_z: float
 	
-	var min_x = world_corners[0].x
-	var max_x = world_corners[0].x
-	var min_z = world_corners[0].z
-	var max_z = world_corners[0].z
-	
-	for corner in world_corners:
-		min_x = min(min_x, corner.x)
-		max_x = max(max_x, corner.x)
-		min_z = min(min_z, corner.z)
-		max_z = max(max_z, corner.z)
-	
-	# Add padding
-	var padding = tile_size * 2
-	min_x -= padding
-	max_x += padding
-	min_z -= padding
-	max_z += padding
+	# If corner projection failed, use fallback based on camera size
+	if world_corners.size() < 3:
+		# Fallback: use camera size to estimate visible area
+		var world_width = camera.size
+		var pixel_size = viewport.get_visible_rect().size
+		var world_height = camera.size * (pixel_size.y / pixel_size.x)
+		
+		# Account for isometric view - need larger coverage
+		var coverage = max(world_width, world_height) * 1.5
+		
+		min_x = player_ground.x - coverage * 0.5
+		max_x = player_ground.x + coverage * 0.5
+		min_z = player_ground.z - coverage * 0.5
+		max_z = player_ground.z + coverage * 0.5
+	else:
+		# Use projected corners
+		min_x = world_corners[0].x
+		max_x = world_corners[0].x
+		min_z = world_corners[0].z
+		max_z = world_corners[0].z
+		
+		for corner in world_corners:
+			min_x = min(min_x, corner.x)
+			max_x = max(max_x, corner.x)
+			min_z = min(min_z, corner.z)
+			max_z = max(max_z, corner.z)
+		
+		# Add padding
+		var padding = tile_size * 2
+		min_x -= padding
+		max_x += padding
+		min_z -= padding
+		max_z += padding
 	
 	# Calculate tile bounds
 	var min_tile_x = int(min_x / tile_size)
