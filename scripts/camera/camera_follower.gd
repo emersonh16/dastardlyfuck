@@ -10,6 +10,10 @@ var camera_height: float = 150.0
 var elevation: float = deg_to_rad(30.0)  # How high up
 var azimuth: float = deg_to_rad(45.0)    # Rotation around Y axis
 
+# Store the correct rotation once calculated
+var fixed_rotation_set: bool = false
+var fixed_rotation_value: Vector3 = Vector3.ZERO
+
 func _ready():
 	# Set up orthographic projection
 	projection = PROJECTION_ORTHOGONAL
@@ -55,14 +59,13 @@ func _process(delta):
 	# Smooth interpolation for position (but keep camera angle fixed)
 	position = position.lerp(desired_pos, 10.0 * delta)
 	
-	# FIXED: Use look_at() to point at target, then lock rotation
+	# FIXED: Use look_at() to center on target, then lock rotation to prevent drift
 	look_at(target_pos, Vector3.UP)
 	
-	# Immediately lock rotation to prevent drift
-	# Calculate fixed rotation from isometric angles
-	# The camera should always have the same rotation regardless of position
-	var fixed_rotation_y = azimuth  # 45 degrees around Y
-	var fixed_rotation_x = -elevation  # -30 degrees around X (negative because we're looking down)
+	# Store the correct rotation the first time (when camera is properly positioned)
+	if not fixed_rotation_set:
+		fixed_rotation_value = rotation
+		fixed_rotation_set = true
 	
-	# Set fixed rotation (this prevents drift while maintaining correct orientation)
-	rotation = Vector3(fixed_rotation_x, fixed_rotation_y, 0.0)
+	# Always use the stored fixed rotation (prevents drift while maintaining centering)
+	rotation = fixed_rotation_value
