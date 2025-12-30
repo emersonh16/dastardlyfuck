@@ -46,9 +46,8 @@ func _ready():
 	var tile_z = miasma_manager.MIASMA_TILE_SIZE_Z if miasma_manager else MIASMA_TILE_SIZE_Z
 	var block_h = miasma_manager.MIASMA_BLOCK_HEIGHT if miasma_manager else MIASMA_BLOCK_HEIGHT
 	
-	# Make blocks smaller to show edges for debugging (0.9x size = 10% gap)
-	# This creates visible dark gaps between blocks
-	var edge_gap = 0.9  # 10% smaller = more visible edges
+	# Blocks are full size - completely touching with no gaps
+	var edge_gap = 1.0  # Full size = no gaps
 	box_mesh.size = Vector3(tile_x * edge_gap, block_h, tile_z * edge_gap)
 	
 	# Create purple material - gaps between blocks will show as dark edges
