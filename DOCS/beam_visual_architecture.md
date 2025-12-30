@@ -136,25 +136,26 @@ project_circle_to_isometric(center: Vector3, radius: float) -> VisualRepresentat
 
 ## Implementation Status
 
-**✅ IMPLEMENTED: Option A (Natural Projection) with Screen Alignment**
+**✅ IMPLEMENTED: Custom Flat Circle Mesh (Option 3)**
 
 **What we did:**
-1. **Rotation for screen alignment** - -90° around X to flatten, -45° around Y to compensate camera
-2. **Single source of truth** - BeamManager.get_clearing_radius() defines both hitbox and visual
-3. **Natural projection with compensation** - Circle in world space, rotated to appear straight on screen
-4. **Designed solution** - Based on camera's 45° azimuth, not trial-and-error
+1. **Custom mesh creation** - Created flat circle mesh directly on XZ plane using ArrayMesh
+2. **No rotation needed** - Mesh is naturally flat, so `rotation_degrees = Vector3(0, 0, 0)`
+3. **Single source of truth** - BeamManager.get_clearing_radius() defines both hitbox and visual
+4. **Clean architecture** - No rotation guessing, just a flat circle that matches clearing
 
 **Code changes:**
-- `beam_renderer.gd`: Rotation set to `Vector3(-90, -45, 0)`
-  - -90° around X: Flattens cylinder to XZ plane
-  - -45° around Y: Compensates for camera's 45° azimuth (makes ellipse appear straight)
+- `beam_renderer.gd`: Created `_create_circle_mesh()` function
+  - Generates 64 vertices in a circle on XZ plane (Y=0)
+  - Creates triangles from center to edge (fan pattern)
+  - No rotation needed - already flat!
 - Visual uses exact radius from `BeamManager.get_clearing_radius()`
 - Both hitbox and visual are circles in world space, so they match exactly
 
 **Result:**
 - Visual matches hitbox (both are circles in world space)
-- Visual appears straight on screen (aligned with screen axes) instead of rotated 45°
-- Mathematically correct compensation, not a patch fix
+- Visual appears correctly in isometric view (natural projection as ellipse)
+- Clean, simple solution - no rotation complications
 
 ## Questions to Answer
 

@@ -127,9 +127,6 @@ func _process(_delta):
 	# This ensures the ellipse doesn't go below ground and is visible above the derelict
 	beam_mesh_instance.position = Vector3(0, 2.0, 0)
 	
-	# DEBUG: Print visual position and radius (only once per second to avoid spam)
-	if Engine.get_process_frames() % 60 == 0:
-		print("VISUAL: pos=", ground_pos, " radius=", current_radius, " mesh_pos=", beam_mesh_instance.position, " rotation=", beam_mesh_instance.rotation_degrees)
 
 func _on_beam_mode_changed(mode):
 	if not beam_mesh_instance:
@@ -162,9 +159,6 @@ func _update_bubble_visual(radius: float):
 	
 	if not beam_mesh_instance:
 		return
-	
-	# DEBUG: Print when visual radius is updated
-	print("VISUAL UPDATE: Setting radius to ", radius)
 	
 	# Recreate circle mesh with new radius
 	# ArrayMesh doesn't support dynamic radius updates, so we recreate it

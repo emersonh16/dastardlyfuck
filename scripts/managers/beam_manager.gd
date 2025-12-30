@@ -18,8 +18,8 @@ var beam_energy: float = 64.0
 var beam_level: int = 1
 
 # Beam parameters (from JS design)
-const BUBBLE_MIN_RADIUS = 48.0  # World units
-const BUBBLE_MAX_RADIUS = 96.0
+const BUBBLE_MIN_RADIUS = 24.0  # World units (halved from original 48.0)
+const BUBBLE_MAX_RADIUS = 48.0  # World units (halved from original 96.0)
 const CONE_LENGTH = 128.0
 const CONE_ANGLE_DEG = 64.0
 const LASER_LENGTH = 256.0
