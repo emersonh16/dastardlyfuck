@@ -152,10 +152,10 @@ func _do_render_update():
 	
 	# OPTIMIZATION: Get all cleared tiles in area ONCE (batch lookup)
 	# This avoids thousands of individual dictionary lookups
-	var half_x = (max_tile_x - min_tile_x) / 2
-	var half_z = (max_tile_z - min_tile_z) / 2
-	var center_tile_x = (min_tile_x + max_tile_x) / 2
-	var center_tile_z = (min_tile_z + max_tile_z) / 2
+	var half_x = (max_tile_x - min_tile_x) / 2.0
+	var half_z = (max_tile_z - min_tile_z) / 2.0
+	var center_tile_x = (min_tile_x + max_tile_x) / 2.0
+	var center_tile_z = (min_tile_z + max_tile_z) / 2.0
 	var cleared_in_area = miasma_manager.get_cleared_tiles_in_area(center_tile_x, center_tile_z, half_x + 1, half_z + 1)
 	
 	# Convert to Set for O(1) lookup (much faster than calling is_cleared() thousands of times)
@@ -182,7 +182,6 @@ func _do_render_update():
 	
 	var vertex_index = 0
 	var index_index = 0
-	var tiles_rendered = 0
 	
 	# Build mesh tile by tile, skipping cleared tiles
 	# Only render tiles that are actually visible on screen (within projected bounds)
@@ -225,7 +224,6 @@ func _do_render_update():
 			
 			vertex_index += 4
 			index_index += 6
-			tiles_rendered += 1
 	
 	# Resize arrays to actual size (remove unused pre-allocated space)
 	vertices.resize(vertex_index)
