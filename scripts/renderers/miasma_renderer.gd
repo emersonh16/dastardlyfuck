@@ -5,7 +5,7 @@ extends Node3D
 # Constants (fallback if autoload not ready)
 const MIASMA_TILE_SIZE_X = 2.0  # Even smaller blocks for more granular fog
 const MIASMA_TILE_SIZE_Z = 2.0  # Even smaller blocks for more granular fog
-const MIASMA_BLOCK_HEIGHT = 16.0
+const MIASMA_BLOCK_HEIGHT = 16.0  # Legacy - now using thin 2D sheet (0.1 thickness)
 
 var miasma_manager: Node
 var mesh_instance: MultiMeshInstance3D
@@ -40,15 +40,15 @@ func _ready():
 	mesh_instance = MultiMeshInstance3D.new()
 	add_child(mesh_instance)
 	
-	# Create box mesh for miasma blocks
+	# Create flat box mesh for miasma blocks (2D sheet on ground)
 	box_mesh = BoxMesh.new()
 	var tile_x = miasma_manager.MIASMA_TILE_SIZE_X if miasma_manager else MIASMA_TILE_SIZE_X
 	var tile_z = miasma_manager.MIASMA_TILE_SIZE_Z if miasma_manager else MIASMA_TILE_SIZE_Z
-	var block_h = miasma_manager.MIASMA_BLOCK_HEIGHT if miasma_manager else MIASMA_BLOCK_HEIGHT
+	var sheet_thickness = 0.1  # Thin 2D sheet (was block_h = 16.0)
 	
 	# Blocks are full size - completely touching with no gaps
 	var edge_gap = 1.0  # Full size = no gaps
-	box_mesh.size = Vector3(tile_x * edge_gap, block_h, tile_z * edge_gap)
+	box_mesh.size = Vector3(tile_x * edge_gap, sheet_thickness, tile_z * edge_gap)
 	
 	# Create purple material - gaps between blocks will show as dark edges
 	material = StandardMaterial3D.new()
@@ -89,10 +89,11 @@ func _render_test_blocks():
 	
 	mesh_instance.multimesh.instance_count = test_blocks.size()
 	var index = 0
+	var sheet_thickness = 0.1  # Thin 2D sheet
 	for tile_pos in test_blocks.keys():
 		var world_x = tile_pos.x * MIASMA_TILE_SIZE_X
 		var world_z = tile_pos.y * MIASMA_TILE_SIZE_Z
-		var world_y = MIASMA_BLOCK_HEIGHT / 2.0
+		var world_y = sheet_thickness / 2.0  # Flat on ground
 		
 		var block_transform = Transform3D(
 			Basis(),
@@ -135,14 +136,14 @@ func _do_render_update():
 		if not blocks[tile_pos]:  # Skip absent blocks
 			continue
 		
-		# Convert tile position to world position
+		# Convert tile position to world position (2D sheet on ground)
 		var tile_x = miasma_manager.MIASMA_TILE_SIZE_X if miasma_manager else MIASMA_TILE_SIZE_X
 		var tile_z = miasma_manager.MIASMA_TILE_SIZE_Z if miasma_manager else MIASMA_TILE_SIZE_Z
-		var block_h = miasma_manager.MIASMA_BLOCK_HEIGHT if miasma_manager else MIASMA_BLOCK_HEIGHT
+		var sheet_thickness = 0.1  # Thin 2D sheet
 		
 		var world_x = tile_pos.x * tile_x
 		var world_z = tile_pos.y * tile_z
-		var world_y = block_h / 2.0  # Center block on ground
+		var world_y = sheet_thickness / 2.0  # Flat on ground (slightly above to avoid z-fighting)
 		
 		var block_transform = Transform3D(
 			Basis(),

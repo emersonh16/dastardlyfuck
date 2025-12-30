@@ -53,9 +53,9 @@ func _create_beam_visual():
 	beam_mesh_instance = MeshInstance3D.new()
 	beam_mesh_instance.mesh = circle_mesh
 	
-	# NO ROTATION NEEDED - mesh is already flat on XZ plane!
-	beam_mesh_instance.rotation_degrees = Vector3(0, 0, 0)  # Already flat, no rotation
-	beam_mesh_instance.scale = Vector3(1.0, 1.0, 1.0)  # No scaling - show actual circle
+	# 2D sheet - flat on XZ plane, no X or Z rotation (only Y rotation for direction)
+	beam_mesh_instance.rotation_degrees = Vector3(0, 0, 0)  # Flat on ground, no tilt
+	beam_mesh_instance.scale = Vector3(1.0, 1.0, 1.0)  # No scaling
 	
 	beam_material = StandardMaterial3D.new()
 	beam_material.albedo_color = Color(1.0, 0.84, 0.0, 0.2)  # Gold color, 20% opacity (more translucent)
@@ -121,19 +121,18 @@ func _process(_delta):
 	var ground_pos = Vector3(derelict_pos.x, 0, derelict_pos.z)  # Ground level - matches clearing
 	global_position = ground_pos
 	
-	# Position beam well above ground level
-	# Ground is at Y=-1.0, derelict at Y=0, so position beam at Y=2.0 to be clearly visible
-	beam_mesh_instance.position = Vector3(0, 2.0, 0)
+	# Position beam flat on ground (2D sheet) - slightly above to avoid z-fighting
+	beam_mesh_instance.position = Vector3(0, 0.01, 0)
 	
-	# Rotate cone/laser toward mouse
+	# Rotate cone/laser toward mouse (only Y rotation - keep it flat/2D)
 	var current_mode = beam_manager.get_mode()
 	if current_mode == BeamManager.BeamMode.CONE or current_mode == BeamManager.BeamMode.LASER:
 		var mouse_pos = _get_mouse_world_position()
 		if mouse_pos != Vector3.ZERO:
 			var direction = (mouse_pos - ground_pos)
 			if direction.length() > 0.1:
-				var angle = atan2(direction.x, direction.z)  # Y rotation for isometric
-				beam_mesh_instance.rotation.y = angle
+				var angle = atan2(direction.x, direction.z)  # Y rotation only (2D sheet)
+				beam_mesh_instance.rotation = Vector3(0, angle, 0)  # Only Y rotation, X and Z stay 0
 	
 
 func _on_beam_mode_changed(mode):
