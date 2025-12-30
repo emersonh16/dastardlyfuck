@@ -106,3 +106,14 @@ func get_clearing_params() -> Dictionary:
 			return {"length": LASER_LENGTH, "thickness": LASER_THICKNESS, "shape": "line"}
 		_:
 			return {"radius": 0.0, "shape": "none"}
+
+# Get clearing radius for current mode (shared by hitbox and visual)
+func get_clearing_radius() -> float:
+	var params = get_clearing_params()
+	return params.get("radius", 0.0)
+
+# Get visual ellipse scale factor for isometric projection
+# Returns the compression factor needed to show a circle as an ellipse
+func get_isometric_scale_factor() -> float:
+	# For 30° elevation: cos(30°) ≈ 0.866
+	return cos(deg_to_rad(30.0))
