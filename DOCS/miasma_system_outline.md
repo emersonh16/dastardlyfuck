@@ -17,106 +17,113 @@
 ## Miasma System Specifications
 
 ### Grid & Scale
-- **Ground Tiles:** 64x32 units (isometric, represents 25 feet)
-- **Miasma Tiles:** 8x4 units (sub-grid of ground tiles)
-  - 1 ground tile = 8 miasma tiles (8×8 = 64, 8×4 = 32)
-- **Miasma Block Dimensions:** 8x × 4y × 16z units (world space)
-- **Visible Blocks:** ~23,328 blocks at 1152x648 viewport
+- **Ground Tiles:** 64x64 units (square from top-down, isometric view)
+- **Miasma Tiles:** 2x2 units (sub-grid of ground tiles)
+  - 1 ground tile = 32 miasma tiles (32×2 = 64)
+- **Miasma Sheet:** 2D flat sheet at Y=0.01 (flat on ground)
+- **Tile Size:** 2x2 world units per miasma tile
 
 ### Visual Design
-- **Shape:** 3D cubes/blocks (not flat)
-- **Height:** ~25 feet tall (matches ground tile height)
+- **Shape:** 2D flat sheet (not 3D blocks)
+- **Height:** 0.1 units thick (flat sheet)
+- **Position:** Y=0.01 (slightly above ground to avoid z-fighting)
 - **Color:** Purple (solid color for now, animation later)
-- **Edges:** Sharp (no beveling)
-- **Opacity:** Opaque blocks, see through gaps to world underneath
-- **Style:** Blocky, arcadey, Into the Breach aesthetic
+- **Opacity:** Opaque sheet with holes where cleared
+- **Style:** Continuous sheet with holes, not individual blocks
 
 ### Behavior
-- **State:** Binary (present/absent, no partial states)
+- **State:** Inverse model - miasma assumed everywhere, only cleared tiles tracked
 - **Clearing:** Instant removal when beam hits (ONLY beam clears, not walker)
-- **Regrowth:** Configurable rate, gaps refill over time (independent of wind)
-- **Wind Movement:** Whole sheet moves together, blocks snap instantly to grid
-- **Collision:** Tall mountains block miasma, short objects get engulfed
-- **Scope:** Miasma only around player (viewport + buffer), moves with player (not world-filling)
+- **Regrowth:** Creeping pattern from borders, 1.5s delay, 15% chance, dynamic budget
+- **Wind Movement:** Coordinate system shifts with wind velocity (advection)
+- **Frontier System:** Tracks boundary tiles for efficient regrowth
+- **Scope:** Miasma sheet follows player position, renders visible viewport + padding
 
 ### Technical Architecture
 
 #### Data Structure
-- **Storage:** Dictionary-based (only store "present" blocks, not empty space)
-  - Format: `{chunk_key: ChunkData}`
-  - Chunk key: `"x,y"` (chunk coordinates)
-- **Block State:** `Dictionary` of `Vector3i` → `bool` (present/absent)
+- **Storage:** Inverse model - Dictionary of cleared tiles
+  - Format: `cleared_tiles: Dictionary` - `Vector2i` → `float` (timestamp)
+  - Only cleared tiles are stored (miasma assumed everywhere else)
+- **Frontier:** `Dictionary` of `Vector2i` → `bool` - Tracks boundary tiles for regrowth
+- **Coordinates:** 2D grid (X, Z), stored as `Vector2i` (Z=0 in Vector3i for compatibility)
 
-#### Chunking System
-- **Chunk Size:** 64x64 miasma tiles per chunk (512×256 world units)
-- **Load Distance:** Viewport + buffer (miasma moves with player, not world-filling)
-- **Management:** Miasma layer follows player position
-- **Dirty Flagging:** Only rebuild mesh when chunks change
+#### Rendering System
+- **Method:** Single `ArrayMesh` built from visible tiles
+- **Update Strategy:** Rebuilds only when visible bounds, wind offset, player tile, or camera rotation change significantly
+- **Optimization:** Early exits, batch lookups, pre-allocated arrays
+- **Performance:** 60 FPS with optimized thresholds
 
-#### Rendering
-- **Method:** `MultiMeshInstance3D` (one draw call, GPU instancing)
-- **Material:** Purple, opaque
-- **Updates:** Rebuild mesh only for dirty chunks
-- **Performance:** Target 60fps with ~23k visible blocks
+#### Regrowth System
+- **Delay:** 1.5 seconds before regrowth can occur
+- **Chance:** 15% per eligible tile per frame
+- **Budget:** Dynamic (128 base + viewport scaling factor 0.125)
+- **Pattern:** Creeps back from borders where miasma meets cleared areas
+- **Scan Limit:** Max 4000 tiles scanned per frame
+- **Offscreen Management:** Only processes visible area + padding
 
 #### Wind Integration
-- **Source:** Wind system provides velocity (vx, vy in tiles/sec)
-- **Movement:** All blocks shift one tile per update in wind direction
-- **Snapping:** Instant grid snapping (blocky, arcadey feel)
-- **Visual:** Smooth appearance via shader/material (logic instant, visual smooth)
+- **Source:** WindManager provides velocity (vx, vz in tiles/sec)
+- **Advection:** Miasma coordinate system shifts with wind velocity
+- **Offset Tracking:** `wind_offset_x` and `wind_offset_z` track cumulative shift
+- **Effect:** Cleared tiles appear to move with wind (coordinate system shift)
+- **Independent:** Wind does not affect regrowth (regrowth uses original coordinates)
 
 #### Beam Clearing
-- **Method:** Instant removal (sets blocks to absent in affected chunks)
-- **Shape:** Circular in top-down, elliptical in isometric (approximated with 8x4 grid)
-- **Integration:** Marks chunks dirty for mesh rebuild
+- **Method:** Instant removal (adds tiles to `cleared_tiles` dictionary)
+- **Shape:** Circular clearing (uses tile centers for distance calculation)
+- **Integration:** Updates frontier for regrowth, emits `cleared_changed` signal
+- **Modes:** Bubble (circular), Cone (sector), Laser (line with thickness)
 
 ### Coordinate System
-- **Logic:** 2D grid (x, y) - stored as `Vector3i(x, y, 0)`
-- **Rendering:** Convert to 3D isometric positions
-- **World Space:** XZ plane for logic, Y for height
+- **Logic:** 2D grid (X, Z) - stored as `Vector2i` (or `Vector3i(x, 0, z)` for compatibility)
+- **Rendering:** 2D sheet at Y=0.01 (flat on ground)
+- **World Space:** XZ plane for logic, Y=0.01 for rendering
+- **Wind Offset:** Coordinate system shifts with wind (`wind_offset_x`, `wind_offset_z`)
 
 ## Implementation Plan
 
-### Phase 1: Foundation (MINIMAL TEST SCENE)
-1. Set up 3D project with 45-degree orthographic isometric camera
-2. Create MiasmaManager (Autoload singleton)
-3. Create basic block storage (viewport + buffer around player)
-4. Create MiasmaRenderer with MultiMeshInstance3D
-5. Render static purple blocks (test performance)
-6. Camera follows player position (miasma moves with player)
+### Phase 1: Foundation ✅ COMPLETE
+1. ✅ Set up 3D project with isometric camera (free rotation enabled)
+2. ✅ Create MiasmaManager (Autoload singleton)
+3. ✅ Create inverse model storage (cleared tiles dictionary)
+4. ✅ Create MiasmaRenderer with ArrayMesh (2D sheet)
+5. ✅ Render 2D purple sheet with holes (60 FPS)
+6. ✅ Camera follows player position (miasma moves with player)
 
-### Phase 2: Core System
-1. Implement block storage (Dictionary-based)
-2. Create MiasmaRenderer with MultiMeshInstance3D
-3. Basic rendering of static blocks
-4. Chunk dirty flagging system
+### Phase 2: Core System ✅ COMPLETE
+1. ✅ Implement inverse model storage (Dictionary-based)
+2. ✅ Create MiasmaRenderer with ArrayMesh (single mesh)
+3. ✅ Basic rendering of 2D sheet with holes
+4. ✅ Optimized mesh rebuilding (thresholds, early exits)
 
-### Phase 3: Wind Integration
-1. Connect to wind system
-2. Implement block movement (whole sheet shifts)
-3. Chunk boundary handling for wind movement
-4. Visual smoothing
+### Phase 3: Wind Integration ✅ COMPLETE
+1. ✅ Connect to WindManager
+2. ✅ Implement coordinate system advection (wind offset)
+3. ✅ Renderer responds to wind changes
+4. ✅ Wind does not affect regrowth
 
-### Phase 4: Beam Integration
-1. Implement clearing logic (instant removal)
-2. Elliptical clearing shape (isometric projection)
-3. Chunk update on clear
+### Phase 4: Beam Integration ✅ COMPLETE
+1. ✅ Implement clearing logic (instant removal)
+2. ✅ Circular clearing shape (tile center distance)
+3. ✅ Updates frontier for regrowth
 
-### Phase 5: Regrowth System
-1. Configurable regrowth rate
-2. Gap detection and refilling
-3. Performance optimization
+### Phase 5: Regrowth System ✅ COMPLETE
+1. ✅ Creeping regrowth pattern from borders
+2. ✅ 1.5s delay, 15% chance, dynamic budget
+3. ✅ Performance optimization (60 FPS)
 
-### Phase 6: Collision & Occlusion
+### Phase 6: Collision & Occlusion 🚧 FUTURE
 1. Mountain blocking (height-based)
 2. Object engulfment (short objects)
 3. Visual occlusion
 
-## Performance Targets
-- **FPS:** 60fps minimum
-- **Visible Blocks:** ~23,328 blocks
-- **Update Budget:** Only update dirty chunks per frame
-- **Memory:** Efficient chunk-based loading/unloading
+## Performance Targets ✅ ACHIEVED
+- **FPS:** 60fps (achieved)
+- **Visible Tiles:** Dynamic based on viewport
+- **Update Budget:** Dynamic regrowth budget (128 base + scaling)
+- **Memory:** Efficient dictionary-based storage (only cleared tiles stored)
+- **Optimizations:** Early exits, thresholds, batch operations, pre-allocated arrays
 
 ## Open Questions / Future Enhancements
 - Animation system (color shift, opacity pulse, etc.)

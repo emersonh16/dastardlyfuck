@@ -32,18 +32,21 @@ These are global systems that persist across scenes and manage game state:
   - `get_all_blocks()` - Get all blocks for rendering
   - `update_player_position(pos)` - Update miasma around player
 
-#### 2. **WindManager** (To be created)
-- **Purpose:** Manages wind direction, speed, and advection
-- **Data:** Wind velocity (vx, vy), wind state
+#### 2. **WindManager** ✅ (Implemented)
+- **Purpose:** Manages global wind direction, speed, and advection
+- **Data:** Wind velocity (vx, vz), wind state (enabled, direction_degrees, speed_tiles_per_sec)
 - **Responsibilities:**
-  - Calculate wind velocity based on biome/weather
-  - Provide wind data to MiasmaManager for advection
-  - Handle wind changes over time
+  - Provide global wind velocity (simple direction + speed)
+  - Emit signals when wind changes
+  - Support enable/disable toggle
 - **Signals:**
-  - `wind_changed(velocity)` - Emitted when wind changes
+  - `wind_changed(velocity: Vector2)` - Emitted when wind changes
 - **Public API:**
-  - `get_wind_velocity()` - Get current wind (vx, vy in tiles/sec)
-  - `get_wind_direction()` - Get wind direction for HUD
+  - `get_velocity() -> Vector2` - Get current wind velocity (vx, vz in tiles/sec)
+  - `set_direction(degrees: float)` - Set wind direction
+  - `set_speed(speed: float)` - Set wind speed
+  - `set_enabled(e: bool)` - Enable/disable wind
+  - `get_state() -> Dictionary` - Get full wind state for HUD
 
 #### 3. **WorldManager** (To be created)
 - **Purpose:** Manages world generation, biomes, chunks, terrain
@@ -61,22 +64,24 @@ These are global systems that persist across scenes and manage game state:
   - `get_chunk_at(world_pos)` - Get chunk data
   - `generate_world(seed)` - Generate world from seed
 
-#### 4. **BeamManager** (To be created)
-- **Purpose:** Manages beam system (bubble/cone/laser modes, energy)
-- **Data:** Beam mode, energy level, beam state
+#### 4. **BeamManager** ✅ (Implemented)
+- **Purpose:** Manages beam system (bubble/cone/laser modes, clearing)
+- **Data:** Beam mode, beam state
 - **Responsibilities:**
-  - Handle beam mode switching
-  - Manage energy/cooldown
+  - Handle beam mode switching (OFF, BUBBLE_MIN, BUBBLE_MAX, CONE_MIN, CONE_MAX, LASER)
   - Calculate beam clearing areas
-  - Call MiasmaManager.clear_area() when beam fires
+  - Provide clearing parameters to SimpleBeam
 - **Signals:**
   - `beam_mode_changed(mode)` - Emitted when mode changes
-  - `beam_energy_changed(energy)` - Emitted when energy changes
   - `beam_fired(position, radius)` - Emitted when beam clears miasma
 - **Public API:**
-  - `set_mode(mode)` - Set beam mode (bubble/cone/laser)
-  - `get_energy()` - Get current energy
-  - `fire_beam(position, direction)` - Fire beam at position
+  - `set_mode(mode)` - Set beam mode
+  - `get_mode() -> BeamMode` - Get current mode
+  - `get_clearing_params() -> Dictionary` - Get clearing parameters for current mode
+  - `clear_bubble(origin, radius)` - Clear bubble shape
+  - `clear_cone(origin, direction, length, angle)` - Clear cone shape
+  - `clear_laser(origin, direction, length, thickness)` - Clear laser shape
+- **Note:** Energy system removed - beam fires continuously
 
 #### 5. **DerelictManager** (To be created)
 - **Purpose:** Manages derelict (player) state, systems, health
@@ -114,13 +119,14 @@ These are scene-specific nodes that handle rendering and gameplay:
   - Render ground tiles based on biome
   - Update when chunks load/unload
 
-#### **BeamRenderer** (To be created)
-- **Purpose:** Renders beam visual (ellipse/circle)
+#### **BeamRenderer** ✅ (Implemented)
+- **Purpose:** Renders beam visual (2D sheet at Y=0.01)
 - **Data Source:** BeamManager (via signals)
 - **Responsibilities:**
-  - Visualize beam clearing area
+  - Visualize beam clearing area (bubble, cone, laser)
   - Match visual to hitbox exactly
   - Update when beam mode/position changes
+  - All visuals are 2D sheets, flat on ground
 
 #### **Derelict** (Player node - rename from Player)
 - **Purpose:** The derelict walker (player character)
@@ -189,15 +195,15 @@ WindManager
 scripts/
   ├── managers/          # Autoload singletons
   │   ├── miasma_manager.gd ✅
-  │   ├── wind_manager.gd
+  │   ├── wind_manager.gd ✅
   │   ├── world_manager.gd
-  │   ├── beam_manager.gd
+  │   ├── beam_manager.gd ✅
   │   └── derelict_manager.gd
   │
   ├── renderers/         # Visual representation
   │   ├── miasma_renderer.gd ✅
   │   ├── ground_renderer.gd ✅
-  │   └── beam_renderer.gd
+  │   └── beam_renderer.gd ✅
   │
   ├── derelict/          # Derelict (player) systems
   │   ├── derelict.gd (rename from player.gd)
@@ -276,22 +282,24 @@ DerelictManager
 5. Update all references
 
 ### Phase 2: Create New Managers
-1. Create `WindManager` (autoload)
+1. ✅ Create `WindManager` (autoload) - COMPLETE
 2. Create `WorldManager` (autoload)
-3. Create `BeamManager` (autoload)
+3. ✅ Create `BeamManager` (autoload) - COMPLETE
 4. Create `DerelictManager` (autoload)
 
 ### Phase 3: Refactor Existing Systems
-1. Move beam logic from `SimpleBeam` to `BeamManager`
+1. ✅ Move beam logic from `SimpleBeam` to `BeamManager` - COMPLETE
 2. Move player position tracking to `DerelictManager`
-3. Connect systems via signals
-4. Update renderers to use new managers
+3. ✅ Connect systems via signals - COMPLETE
+4. ✅ Update renderers to use new managers - COMPLETE
 
 ### Phase 4: Add New Systems
-1. Implement wind advection in MiasmaManager
+1. ✅ Implement wind advection in MiasmaManager - COMPLETE
 2. Implement biome system in WorldManager
 3. Implement chunking system
-4. Add beam modes (cone/laser)
+4. ✅ Add beam modes (CONE_MIN, CONE_MAX) - COMPLETE
+5. ✅ Implement miasma regrowth - COMPLETE
+6. ✅ Remove energy system - COMPLETE
 
 ## Notes
 

@@ -23,12 +23,13 @@
    - **Status:** Working, optimized for 60 FPS
 
 2. **Beam System**
-   - **BeamManager** (autoload) - manages modes, energy, clearing logic
-   - **BeamRenderer** - visualizes beam (circle on XZ plane, appears as ellipse isometrically)
+   - **BeamManager** (autoload) - manages modes, clearing logic (energy removed)
+   - **BeamRenderer** - visualizes beam (2D sheet at Y=0.01, flat on ground)
    - **SimpleBeam** - handles continuous clearing every frame
-   - **BeamInput** - handles mode switching (mouse wheel, number keys 1-5)
-   - **Modes:** OFF, BUBBLE_MIN, BUBBLE_MAX, CONE, LASER
-   - **Status:** All modes working, continuous clearing implemented
+   - **BeamInput** - handles mode switching (mouse wheel with scroll sensitivity, number keys 1-6)
+   - **Modes:** OFF, BUBBLE_MIN, BUBBLE_MAX, CONE_MIN, CONE_MAX, LASER
+   - **Scroll behavior:** Scroll DOWN → LASER (locks), Scroll UP → OFF (locks), requires 3 scroll events per mode change
+   - **Status:** All modes working, continuous clearing implemented, no energy system
 
 3. **Player (Derelict)**
    - CharacterBody3D with WASD movement
@@ -47,14 +48,19 @@
    - Positioned at Y=-1.0
    - **Status:** Working
 
+### ✅ Recently Implemented
+
+- **Wind System** - Global wind with direction and speed, causes miasma advection
+- **Miasma Regrowth** - Creeping regrowth from borders, 1.5s delay, 15% chance
+- **Ground Renderer** - Green tiles with brown borders (64x64 world units)
+- **Camera Rotation** - Free rotation enabled (right-click drag or middle mouse)
+- **Beam Mode Cycling** - CONE_MIN and CONE_MAX added, scroll sensitivity (3 threshold), locks at ends
+
 ### 🚧 Not Yet Implemented
 
-- Wind system (advection)
 - World generation (biomes, chunks)
 - DerelictManager (position ownership)
-- Energy UI display
-- Miasma regrowth
-- Beam visual for cone/laser modes (only bubble has visual)
+- Energy UI display (energy system removed)
 
 ## Architecture
 
@@ -82,8 +88,9 @@ Autoload Singletons (Managers):
 ├── MiasmaManager ✅
 │   └── Manages miasma block state, clearing, player-centric updates
 ├── BeamManager ✅
-│   └── Manages beam modes, energy, clearing parameters
-├── WindManager (not yet created)
+│   └── Manages beam modes, clearing parameters (no energy)
+├── WindManager ✅
+│   └── Manages global wind direction, speed, advection
 ├── WorldManager (not yet created)
 └── DerelictManager (not yet created)
 
@@ -160,14 +167,15 @@ DOCS/
 ### Layer Positions
 - **Y = -1.0**: Ground tiles
 - **Y = 0.0**: Derelict position (ground level)
-- **Y = 2.0**: Beam visual
-- **Y = 8.0**: Miasma block centers (blocks span Y=0 to Y=16)
+- **Y = 0.01**: Beam visual (2D sheet, flat on ground)
+- **Y = 0.01**: Miasma sheet (2D, flat on ground)
 
 ### Camera
 - **Type**: Orthographic, Isometric
-- **Elevation**: 30° (looking down)
-- **Azimuth**: 45° (rotated around Y axis)
-- **No rotation**: Camera never rotates, only scrolls with player
+- **Elevation**: 30° (looking down, adjustable)
+- **Azimuth**: 45° (rotated around Y axis, adjustable)
+- **Free rotation**: Right-click drag or middle mouse drag to rotate
+- **Follows player**: Camera always centered on player
 
 ### Screen Space → World Space
 - **W (up screen)** → World: (-X, +Z) = Northwest
@@ -210,7 +218,8 @@ DOCS/
 - `OFF` - No beam
 - `BUBBLE_MIN` - Small bubble around player (radius 16.0)
 - `BUBBLE_MAX` - Large bubble around player (radius 32.0)
-- `CONE` - Cone from player toward mouse (length 64.0, angle 32°)
+- `CONE_MIN` - Small cone from player toward mouse (length 48.0, angle 24°)
+- `CONE_MAX` - Large cone from player toward mouse (length 80.0, angle 40°)
 - `LASER` - Laser from player toward mouse (length 128.0, thickness 4.0)
 
 **Key Methods:**
@@ -227,9 +236,7 @@ DOCS/
 - `beam_fired(position, radius)` - Emitted when beam clears miasma
 
 **Energy System:**
-- Max energy: 64.0
-- Regen rates vary by mode (OFF: 0, BUBBLE_MIN: 8.0/sec, etc.)
-- Laser drains 24.0/sec (no regen)
+- **REMOVED** - Beam has no energy limit, can fire continuously
 
 ### SimpleBeam (Scene Node)
 
@@ -273,9 +280,13 @@ DOCS/
   - Player (derelict) in center
 
 ### 3. Controls
-- **WASD** - Move derelict (cardinal screen-space directions)
-- **Mouse Wheel** - Cycle beam modes (OFF → BUBBLE_MIN → BUBBLE_MAX → CONE → LASER → OFF)
-- **Number Keys 1-5** - Direct mode selection (1=OFF, 2=BUBBLE_MIN, 3=BUBBLE_MAX, 4=CONE, 5=LASER)
+- **WASD** - Move derelict (cardinal screen-space directions, locked to camera)
+- **Mouse Wheel** - Cycle beam modes (OFF → BUBBLE_MIN → BUBBLE_MAX → CONE_MIN → CONE_MAX → LASER)
+  - Scroll DOWN → forward toward LASER (locks at LASER)
+  - Scroll UP → backward toward OFF (locks at OFF)
+  - Requires 3 scroll events per mode change (less sensitive)
+- **Number Keys 1-6** - Direct mode selection (1=OFF, 2=BUBBLE_MIN, 3=BUBBLE_MAX, 4=CONE_MIN, 5=CONE_MAX, 6=LASER)
+- **Right-Click Drag / Middle Mouse Drag** - Rotate camera
 
 ### 4. Test Systems
 - **Miasma clearing**: Move around, beam should clear miasma continuously
@@ -286,9 +297,9 @@ DOCS/
 ## Important Gotchas
 
 ### 1. Camera Rotation
-- **CRITICAL**: Camera must NEVER rotate
-- Use fixed `rotation` values, not `look_at()` for orientation
-- Camera only scrolls with player, never rotates
+- **FREE ROTATION ENABLED**: Camera can rotate freely (right-click drag or middle mouse)
+- Camera follows player position but can rotate to any angle
+- Elevation and azimuth are adjustable in real-time
 
 ### 2. Coordinate Spaces
 - Always reference `coordinate_space_reference.md` when working with positions
@@ -301,19 +312,23 @@ DOCS/
 - Don't make tiles smaller without performance testing
 
 ### 4. Beam Visual vs Clearing
+- Beam is a 2D sheet at Y=0.01 (flat on ground, slightly above to avoid z-fighting)
 - Visual must match clearing hitbox exactly
+- Beam rotation only around Y-axis (no X or Z rotation)
 - Circle on XZ plane = ellipse in isometric view (natural projection)
-- Don't try to compensate for isometric projection in visuals
 
 ### 5. Continuous Clearing
 - Beam clears **every frame** (no throttling)
 - Also clears **immediately** on mode switch
 - This is intentional - don't add throttling without user request
+- **No energy limit** - beam can fire continuously
 
-### 6. Energy System
-- Energy regenerates/drains based on mode
-- Laser drains energy (no regen)
-- `can_fire()` checks energy before clearing
+### 6. Miasma System
+- **2D system** - Miasma is a flat 2D sheet at Y=0.01
+- **Inverse model** - Miasma assumed everywhere, only cleared tiles tracked
+- **Regrowth** - Creeps back from borders, 1.5s delay, 15% chance, dynamic budget
+- **Wind advection** - Miasma coordinate system shifts with wind velocity
+- **Frontier system** - Tracks boundary tiles for efficient regrowth
 
 ## Common Tasks
 
@@ -339,12 +354,9 @@ DOCS/
 ## Next Steps (Future Work)
 
 1. **DerelictManager** - Track player position, health, systems
-2. **WindManager** - Wind advection for miasma
-3. **WorldManager** - Biome system, chunk loading
-4. **Cone/Laser Visuals** - Complete beam renderer
-5. **Energy UI** - Display beam energy
-6. **Miasma Regrowth** - Add regrowth logic
-7. **Performance** - Further optimizations if needed
+2. **WorldManager** - Biome system, chunk loading
+3. **Dev HUD** - Display wind state, beam mode, other debug info
+4. **Performance** - Further optimizations if needed (currently 60 FPS)
 
 ## Reference Documents
 
@@ -372,6 +384,6 @@ If you're unsure about:
 
 ---
 
-**Last Updated:** After Phase 1 completion (continuous clearing implemented)
+**Last Updated:** After wind system, regrowth, and beam mode cycling implementation
 **Godot Version:** 4.5
 **Main Test Scene:** `scenes/test/test_miasma.tscn`
