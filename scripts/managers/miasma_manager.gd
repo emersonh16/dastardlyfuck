@@ -52,9 +52,16 @@ func _initialize_default():
 func initialize_miasma(player_pos: Vector3, viewport_width: float, viewport_height: float):
 	player_position = player_pos
 	
-	# Calculate viewport size in tiles
-	viewport_tiles_x = int(viewport_width / MIASMA_TILE_SIZE_X) + buffer_tiles * 2
-	viewport_tiles_z = int(viewport_height / MIASMA_TILE_SIZE_Z) + buffer_tiles * 2
+	# Account for isometric 45° rotation - viewport appears rotated in world space
+	# For 45° isometric, we need a square area that covers the rotated viewport
+	# Use the larger dimension to ensure full coverage in both axes
+	var max_dimension = max(viewport_width, viewport_height)
+	# For 45° rotation, multiply by sqrt(2) to ensure diagonal coverage
+	var coverage_size = max_dimension * 1.414  # sqrt(2) ≈ 1.414
+	
+	# Calculate viewport size in tiles (square area to cover rotated viewport)
+	viewport_tiles_x = int(coverage_size / MIASMA_TILE_SIZE_X) + buffer_tiles * 2
+	viewport_tiles_z = int(coverage_size / MIASMA_TILE_SIZE_Z) + buffer_tiles * 2
 	
 	# Fill area with blocks (for testing)
 	fill_area_around_player()
@@ -74,9 +81,16 @@ func fill_area_around_player():
 	var added = 0
 	# Fill every tile (no gaps) - completely fill the space
 	# IMPORTANT: Only fill NEW areas, never refill cleared areas
+	# Rotate 45° to match isometric viewport: transform (x,z) -> (x-z, x+z) / sqrt(2)
 	for x in range(-half_x, half_x):
 		for z in range(-half_z, half_z):
-			var tile_pos = Vector3i(center_tile_x + x, center_tile_z + z, 0)
+			# Rotate coordinates 45° to match isometric viewport orientation
+			# For 45° rotation: new_x = (x - z) / sqrt(2), new_z = (x + z) / sqrt(2)
+			# But we're working in tile space, so we can use integer approximation
+			var rotated_x = x - z
+			var rotated_z = x + z
+			
+			var tile_pos = Vector3i(center_tile_x + rotated_x, center_tile_z + rotated_z, 0)
 			# Only add if not already present AND not cleared
 			# Cleared tiles should never regrow
 			if not blocks.has(tile_pos) and not cleared_tiles.has(tile_pos):
