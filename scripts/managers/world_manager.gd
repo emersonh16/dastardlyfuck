@@ -65,6 +65,16 @@ func initialize_world(seed: int):
 	print("WorldManager: Generated world with %d Voronoi points" % voronoi_points.size())
 	print("WorldManager: Assigned %d biomes" % biome_assignments.size())
 	
+	# Generate mountains in the world
+	var mountain_manager = get_node_or_null("/root/MountainManager")
+	if mountain_manager:
+		var world_size_world_units = WORLD_SIZE_TILES * GROUND_TILE_SIZE
+		mountain_manager.generate_mountains_in_area(
+			0.0, world_size_world_units,
+			0.0, world_size_world_units
+		)
+		print("WorldManager: Generated mountains")
+	
 	world_generated.emit()
 
 # Get biome at world position

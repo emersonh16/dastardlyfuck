@@ -33,6 +33,9 @@ var game_time: float = 0.0
 # Wind manager reference
 var wind_manager: Node = null
 
+# Mountain manager reference (for blocking checks)
+var mountain_manager: Node = null
+
 # Regrowth settings (match reference implementation)
 # Key: Only boundary tiles regrow, creating gradual creep-in from edges
 const REGROW_DELAY: float = 1.5  # Seconds before cleared tiles can regrow (timer delay)
@@ -62,6 +65,7 @@ func _ready():
 	wind_manager = get_node_or_null("/root/WindManager")
 	if wind_manager:
 		wind_manager.wind_changed.connect(_on_wind_changed)
+	mountain_manager = get_node_or_null("/root/MountainManager")
 	call_deferred("_initialize_default")
 
 func _process(delta):
@@ -160,14 +164,21 @@ func clear_area(world_pos: Vector3, radius: float) -> int:
 			var dist_sq = dxw * dxw + dzw * dzw
 			
 			if dist_sq <= radius_sq:
-				# Convert to wind-relative coordinates for storage
-				var fx = tx - fx_offset
-				var fz = tz - fz_offset
-				var tile_pos = Vector2i(fx, fz)
-				# Only clear if not already cleared
-				if not cleared_tiles.has(tile_pos):
-					tiles_to_clear.append(tile_pos)
-					cleared += 1
+				# Check if blocked by mountains (tall cells block miasma)
+				var tile_world_pos = Vector3(tile_center_x, 0, tile_center_z)
+				var is_blocked = false
+				if mountain_manager and mountain_manager.has_method("is_miasma_blocked_at"):
+					is_blocked = mountain_manager.is_miasma_blocked_at(tile_world_pos)
+				
+				# Only clear if not blocked and not already cleared
+				if not is_blocked:
+					# Convert to wind-relative coordinates for storage
+					var fx = tx - fx_offset
+					var fz = tz - fz_offset
+					var tile_pos = Vector2i(fx, fz)
+					if not cleared_tiles.has(tile_pos):
+						tiles_to_clear.append(tile_pos)
+						cleared += 1
 	
 	# Mark tiles as cleared with timestamp
 	if tiles_to_clear.size() > 0:
