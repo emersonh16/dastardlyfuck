@@ -1,158 +1,161 @@
 extends Node
 
 # MiasmaManager - Autoload singleton
-# Manages miasma block state and coordinates rendering
+# Manages miasma as a 2D sheet with holes (inverse model - track cleared tiles, not existing blocks)
+# Inspired by old 2D top-down implementation
 
 # Constants
-# For isometric squares: make X and Z equal so blocks appear square in isometric view
-const MIASMA_TILE_SIZE_X = 2.0  # Even smaller blocks for more granular fog
-const MIASMA_TILE_SIZE_Z = 2.0  # Even smaller blocks for more granular fog
-const MIASMA_BLOCK_HEIGHT = 16.0
+const MIASMA_TILE_SIZE = 2.0  # World units per tile (2x2 for granular fog)
+const PAD = 6  # Padding around viewport (in tiles)
 
-# Block storage: Dictionary of Vector3i -> bool (present/absent)
-# Using Vector3i for grid coordinates (x, y are 2D grid, z=0 for now)
-var blocks: Dictionary = {}
+# Cleared tiles: Dictionary of Vector2i -> float (timestamp when cleared)
+# Using Vector2i for 2D tile coordinates (x, y)
+# Everything is fog by default - we only track what's been CLEARED
+var cleared_tiles: Dictionary = {}  # Vector2i -> timestamp
 
-# Track cleared tiles (so they don't regrow)
-# Set of Vector3i coordinates that have been permanently cleared
-var cleared_tiles: Dictionary = {}  # Vector3i -> true (cleared)
+# Frontier: Set of cleared tiles that are on the boundary (adjacent to fog)
+# These are candidates for regrowth
+var frontier: Dictionary = {}  # Vector2i -> true
 
-# Viewport + buffer size (in tiles)
+# Viewport tracking
 var viewport_tiles_x: int = 0
 var viewport_tiles_z: int = 0
-var buffer_tiles: int = 4  # Buffer around viewport (reduced further for smaller blocks)
-
-# Player position (world space) - miasma moves with player
 var player_position: Vector3 = Vector3.ZERO
 
+# Time tracking for regrowth
+var game_time: float = 0.0
+
+# Regrowth settings
+const REGROW_DELAY: float = 1.0  # Seconds before cleared tiles can regrow
+const REGROW_CHANCE: float = 0.6  # Probability of regrowth per check
+const REGROW_BUDGET: int = 512  # Max tiles to check for regrowth per frame
+
 # Signal for renderer updates
-signal blocks_changed()
+signal cleared_changed()  # Emitted when cleared tiles change
 
 func _ready():
-	print("MiasmaManager initialized")
-	# Initialize with default viewport size (will be updated by scene)
+	print("MiasmaManager initialized (inverse model - track cleared tiles)")
 	call_deferred("_initialize_default")
 
+func _process(delta):
+	game_time += delta
+	# Regrowth logic can go here later
+
 func _initialize_default():
-	# Default initialization for testing
 	var viewport = get_viewport()
 	if viewport:
-		# Use camera's orthographic size for world units, not pixel size
 		var camera = viewport.get_camera_3d()
-		var world_width = 200.0  # Default camera size
+		var world_width = 200.0
 		var world_height = 200.0
 		if camera and camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
 			world_width = camera.size
 			var pixel_size = viewport.get_visible_rect().size
 			world_height = camera.size * (pixel_size.y / pixel_size.x)
-		# Pass world units - initialize_miasma will add buffer automatically
 		initialize_miasma(Vector3.ZERO, world_width, world_height)
 
-# Initialize miasma around player position
+# Initialize miasma system
 func initialize_miasma(player_pos: Vector3, viewport_width: float, viewport_height: float):
 	player_position = player_pos
 	
-	# Account for isometric 45° rotation - viewport appears rotated in world space
-	# For 45° isometric, we need a square area that covers the rotated viewport
-	# Use the larger dimension to ensure full coverage in both axes
+	# Account for isometric 45° rotation
 	var max_dimension = max(viewport_width, viewport_height)
-	# For 45° rotation, multiply by sqrt(2) to ensure diagonal coverage
-	var coverage_size = max_dimension * 1.414  # sqrt(2) ≈ 1.414
+	var coverage_size = max_dimension * 1.414  # sqrt(2)
 	
-	# Calculate viewport size in tiles (square area to cover rotated viewport)
-	viewport_tiles_x = int(coverage_size / MIASMA_TILE_SIZE_X) + buffer_tiles * 2
-	viewport_tiles_z = int(coverage_size / MIASMA_TILE_SIZE_Z) + buffer_tiles * 2
+	viewport_tiles_x = int(coverage_size / MIASMA_TILE_SIZE) + PAD * 2
+	viewport_tiles_z = int(coverage_size / MIASMA_TILE_SIZE) + PAD * 2
 	
-	# Fill area with blocks (for testing)
-	fill_area_around_player()
-	
-	print("Miasma initialized: ", viewport_tiles_x, "x", viewport_tiles_z, " tiles")
+	print("Miasma initialized: ", viewport_tiles_x, "x", viewport_tiles_z, " tiles (inverse model)")
 
-# Fill area around player with blocks (for testing)
-# Only fills tiles that aren't already cleared
-func fill_area_around_player():
-	# Don't clear existing blocks - only add new ones in empty areas
-	var center_tile_x = int(player_position.x / MIASMA_TILE_SIZE_X)
-	var center_tile_z = int(player_position.z / MIASMA_TILE_SIZE_Z)  # Using Z for isometric
-	
-	var half_x = viewport_tiles_x / 2.0
-	var half_z = viewport_tiles_z / 2.0
-	
-	var added = 0
-	# Fill every tile (no gaps) - completely fill the space
-	# IMPORTANT: Only fill NEW areas, never refill cleared areas
-	# Rotate 45° to match isometric viewport: transform (x,z) -> (x-z, x+z) / sqrt(2)
-	for x in range(-half_x, half_x):
-		for z in range(-half_z, half_z):
-			# Rotate coordinates 45° to match isometric viewport orientation
-			# For 45° rotation: new_x = (x - z) / sqrt(2), new_z = (x + z) / sqrt(2)
-			# But we're working in tile space, so we can use integer approximation
-			var rotated_x = x - z
-			var rotated_z = x + z
-			
-			# Always use Z=0 for 2D prototyping
-			var tile_pos = Vector3i(center_tile_x + rotated_x, center_tile_z + rotated_z, 0)
-			# Only add if not already present AND not cleared
-			# Cleared tiles should never regrow
-			if not blocks.has(tile_pos) and not cleared_tiles.has(tile_pos):
-				blocks[tile_pos] = true
-				added += 1
-	
-	# Always emit signal on initial fill (even if 0 added) so renderer knows to update
-	# This ensures renderer gets the full block set on first load
-	blocks_changed.emit()
-
-# Update player position (miasma follows player)
+# Update player position
 func update_player_position(new_pos: Vector3):
-	# Only update if player moved to a different tile (not every frame)
-	var old_center_x = int(player_position.x / MIASMA_TILE_SIZE_X)
-	var old_center_z = int(player_position.z / MIASMA_TILE_SIZE_Z)
-	
-	var new_center_x = int(new_pos.x / MIASMA_TILE_SIZE_X)
-	var new_center_z = int(new_pos.z / MIASMA_TILE_SIZE_Z)
-	
-	# Only update if player crossed a tile boundary
-	if new_center_x != old_center_x or new_center_z != old_center_z:
-		player_position = new_pos
-		fill_area_around_player()
-	else:
-		# Just update position, don't regenerate miasma
-		player_position = new_pos
+	player_position = new_pos
+	# No need to "fill" fog - it's everywhere by default
 
-# Clear blocks in area (for beam clearing)
-func clear_area(world_pos: Vector3, radius: float):
-	var center_tile_x = int(world_pos.x / MIASMA_TILE_SIZE_X)
-	var center_tile_z = int(world_pos.z / MIASMA_TILE_SIZE_Z)
-	var radius_tiles = int(radius / MIASMA_TILE_SIZE_X) + 1
+# Clear miasma in area (for beam clearing)
+# Returns number of tiles cleared
+func clear_area(world_pos: Vector3, radius: float) -> int:
+	var center_tile_x = int(world_pos.x / MIASMA_TILE_SIZE)
+	var center_tile_z = int(world_pos.z / MIASMA_TILE_SIZE)
+	var radius_tiles = int(radius / MIASMA_TILE_SIZE) + 1
 	var radius_sq = radius * radius
 	
 	var cleared = 0
-	var tiles_to_remove = []
+	var tiles_to_clear = []
 	
-	# First pass: collect tiles to remove (faster than checking each time)
+	# Find all tiles in radius
 	for x in range(-radius_tiles, radius_tiles + 1):
 		for z in range(-radius_tiles, radius_tiles + 1):
-			var dx = x * MIASMA_TILE_SIZE_X
-			var dz = z * MIASMA_TILE_SIZE_Z
+			var dx = x * MIASMA_TILE_SIZE
+			var dz = z * MIASMA_TILE_SIZE
 			var dist_sq = dx * dx + dz * dz
 			
 			if dist_sq <= radius_sq:
-				# Always use Z=0 for 2D prototyping
-				var tile_pos = Vector3i(center_tile_x + x, center_tile_z + z, 0)
-				if blocks.has(tile_pos):
-					tiles_to_remove.append(tile_pos)
-					cleared_tiles[tile_pos] = true  # Mark as permanently cleared
+				var tile_pos = Vector2i(center_tile_x + x, center_tile_z + z)
+				# Only clear if not already cleared
+				if not cleared_tiles.has(tile_pos):
+					tiles_to_clear.append(tile_pos)
 					cleared += 1
 	
-	# Second pass: remove all at once (more efficient)
-	if tiles_to_remove.size() > 0:
-		for tile_pos in tiles_to_remove:
-			blocks.erase(tile_pos)
+	# Mark tiles as cleared with timestamp
+	if tiles_to_clear.size() > 0:
+		for tile_pos in tiles_to_clear:
+			cleared_tiles[tile_pos] = game_time
+			_update_frontier(tile_pos)
 		
-		blocks_changed.emit()
+		cleared_changed.emit()
 	
 	return cleared
 
-# Get all blocks (for rendering)
-func get_all_blocks() -> Dictionary:
-	return blocks.duplicate()
+# Check if a tile is cleared (for rendering/sampling)
+func is_cleared(tile_x: int, tile_z: int) -> bool:
+	var tile_pos = Vector2i(tile_x, tile_z)
+	return cleared_tiles.has(tile_pos)
+
+# Get all cleared tiles in viewport area (for rendering)
+func get_cleared_tiles_in_area(center_tile_x: int, center_tile_z: int, half_x: int, half_z: int) -> Dictionary:
+	var result = {}
+	
+	for x in range(center_tile_x - half_x, center_tile_x + half_x):
+		for z in range(center_tile_z - half_z, center_tile_z + half_z):
+			var tile_pos = Vector2i(x, z)
+			if cleared_tiles.has(tile_pos):
+				result[tile_pos] = cleared_tiles[tile_pos]
+	
+	return result
+
+# Update frontier when a tile is cleared
+func _update_frontier(tile_pos: Vector2i):
+	# Add cleared tile to frontier if it's on boundary
+	if _is_boundary(tile_pos):
+		frontier[tile_pos] = true
+	else:
+		frontier.erase(tile_pos)
+	
+	# Update neighbors
+	_update_neighbor_frontier(Vector2i(tile_pos.x - 1, tile_pos.y))
+	_update_neighbor_frontier(Vector2i(tile_pos.x + 1, tile_pos.y))
+	_update_neighbor_frontier(Vector2i(tile_pos.x, tile_pos.y - 1))
+	_update_neighbor_frontier(Vector2i(tile_pos.x, tile_pos.y + 1))
+
+func _update_neighbor_frontier(tile_pos: Vector2i):
+	if cleared_tiles.has(tile_pos):
+		if _is_boundary(tile_pos):
+			frontier[tile_pos] = true
+		else:
+			frontier.erase(tile_pos)
+
+# Check if a cleared tile is on the boundary (adjacent to fog)
+func _is_boundary(tile_pos: Vector2i) -> bool:
+	# A cleared tile is on boundary if any neighbor is NOT cleared (i.e., has fog)
+	return not cleared_tiles.has(Vector2i(tile_pos.x - 1, tile_pos.y)) or \
+		   not cleared_tiles.has(Vector2i(tile_pos.x + 1, tile_pos.y)) or \
+		   not cleared_tiles.has(Vector2i(tile_pos.x, tile_pos.y - 1)) or \
+		   not cleared_tiles.has(Vector2i(tile_pos.x, tile_pos.y + 1))
+
+# Get tile size (for renderer)
+func get_tile_size() -> float:
+	return MIASMA_TILE_SIZE
+
+# Get viewport size in tiles
+func get_viewport_tiles() -> Vector2i:
+	return Vector2i(viewport_tiles_x, viewport_tiles_z)

@@ -1,137 +1,69 @@
 extends Node3D
 
-# MiasmaRenderer - Renders miasma blocks using MultiMeshInstance3D
-
-# Constants (fallback if autoload not ready)
-const MIASMA_TILE_SIZE_X = 2.0  # Even smaller blocks for more granular fog
-const MIASMA_TILE_SIZE_Z = 2.0  # Even smaller blocks for more granular fog
-const MIASMA_BLOCK_HEIGHT = 16.0  # Legacy - now using thin 2D sheet (0.1 thickness)
+# MiasmaRenderer - Renders miasma as a 2D sheet with holes (inverse model)
+# Inspired by old 2D top-down "plain mode" - full sheet with holes cut out
 
 var miasma_manager: Node
-var mesh_instance: MultiMeshInstance3D
-var box_mesh: BoxMesh
+var mesh_instance: MeshInstance3D
 var material: StandardMaterial3D
 
 # Performance: throttle render updates
 var _pending_update = false
 var _update_timer = 0.0
-const UPDATE_INTERVAL = 0.15  # Update mesh max ~6.7 times per second (reduced for smaller blocks)
-var _initial_render_done = false  # Track if initial render has completed
+const UPDATE_INTERVAL = 0.1  # Update mesh max 10 times per second
+var _initial_render_done = false
 
 func _ready():
-	# Wait for autoload to be ready
 	await get_tree().process_frame
 	
-	# Try accessing autoload - check root children first
-	var root = get_tree().root
-	print("DEBUG: Root has ", root.get_child_count(), " children")
-	
-	# Try multiple methods to find autoload
-	miasma_manager = root.get_node_or_null("MiasmaManager")
+	# Find MiasmaManager
+	miasma_manager = get_node_or_null("/root/MiasmaManager")
 	if not miasma_manager:
-		miasma_manager = get_node_or_null("/root/MiasmaManager")
+		push_warning("MiasmaManager autoload not found!")
+		return
 	
-	if not miasma_manager:
-		push_warning("MiasmaManager autoload not found! Check Project Settings > Autoload.")
-		print("DEBUG: Tried /root/MiasmaManager - not found")
-		print("DEBUG: Root children: ", root.get_children())
-		# Continue with fallback constants - scene should still work
-	
-	# Create MultiMeshInstance3D
-	mesh_instance = MultiMeshInstance3D.new()
+	# Create mesh instance
+	mesh_instance = MeshInstance3D.new()
 	add_child(mesh_instance)
 	
-	# Create flat box mesh for miasma blocks (2D sheet on ground)
-	box_mesh = BoxMesh.new()
-	var tile_x = miasma_manager.MIASMA_TILE_SIZE_X if miasma_manager else MIASMA_TILE_SIZE_X
-	var tile_z = miasma_manager.MIASMA_TILE_SIZE_Z if miasma_manager else MIASMA_TILE_SIZE_Z
-	var sheet_thickness = 0.1  # Thin 2D sheet (was block_h = 16.0)
-	
-	# Blocks are full size - completely touching with no gaps
-	var edge_gap = 1.0  # Full size = no gaps
-	box_mesh.size = Vector3(tile_x * edge_gap, sheet_thickness, tile_z * edge_gap)
-	
-	# Create purple material - gaps between blocks will show as dark edges
+	# Create material (purple fog, like old code)
 	material = StandardMaterial3D.new()
 	material.albedo_color = Color(0.5, 0.2, 0.8, 1.0)  # Purple
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	# Blocks are 10% smaller - gaps will show dark background/edges
+	material.flags_transparent = false
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	
-	# Create MultiMesh
-	var multimesh = MultiMesh.new()
-	multimesh.mesh = box_mesh
-	multimesh.transform_format = MultiMesh.TRANSFORM_3D
-	multimesh.use_colors = false
-	
-	mesh_instance.multimesh = multimesh
 	mesh_instance.material_override = material
 	
-	# Connect to manager signals FIRST (before manager initializes)
-	# This ensures we catch the initial blocks_changed signal
-	if miasma_manager:
-		miasma_manager.blocks_changed.connect(_on_blocks_changed)
-		
-		# Wait for manager to initialize and add blocks
-		# The manager uses call_deferred, so we need to wait
-		for i in range(10):  # Wait up to 10 frames
-			await get_tree().process_frame
-			# Check if blocks have been added
-			if miasma_manager.blocks.size() > 0:
-				break
-		
-		# Wait one more frame to ensure signal has been processed
+	# Connect to manager signals
+	miasma_manager.cleared_changed.connect(_on_cleared_changed)
+	
+	# Wait for manager to initialize
+	for i in range(5):
 		await get_tree().process_frame
-		
-		# Final safety check - render if we have blocks but haven't rendered yet
-		# This catches the case where signal fired before we connected
-		if not _initial_render_done and miasma_manager.blocks.size() > 0:
-			_initial_render_done = true
-			_do_render_update()
-	else:
-		# Don't error - render test blocks manually
-		print("WARNING: MiasmaManager not found - rendering test blocks")
-		_render_test_blocks()
-
-func _render_test_blocks():
-	# Create test blocks if manager not found
-	var test_blocks = {}
-	for x in range(-50, 50):
-		for y in range(-50, 50):
-			test_blocks[Vector3i(x, y, 0)] = true
+		if miasma_manager.viewport_tiles_x > 0:
+			break
 	
-	# Render them
-	if not mesh_instance:
-		return
-	
-	mesh_instance.multimesh.instance_count = test_blocks.size()
-	var index = 0
-	var sheet_thickness = 0.1  # Thin 2D sheet
-	for tile_pos in test_blocks.keys():
-		var world_x = tile_pos.x * MIASMA_TILE_SIZE_X
-		var world_z = tile_pos.y * MIASMA_TILE_SIZE_Z
-		var world_y = sheet_thickness / 2.0  # Flat on ground
-		
-		var block_transform = Transform3D(
-			Basis(),
-			Vector3(world_x, world_y, world_z)
-		)
-		
-		mesh_instance.multimesh.set_instance_transform(index, block_transform)
-		index += 1
+	# Initial render
+	_do_render_update()
 
-
-func _on_blocks_changed():
-	# If this is the first signal after initialization, render immediately (no throttle)
+func _on_cleared_changed():
+	# Throttle updates
+	_pending_update = true
+	# First update renders immediately
 	if not _initial_render_done:
+		_initial_render_done = true
 		_pending_update = false
 		_update_timer = 0.0
 		_do_render_update()
-		return
-	
-	# Throttle updates for performance (after initial render)
-	_pending_update = true
 
 func _process(delta):
+	# Always update position to follow player smoothly (no stuttering)
+	var player_pos = miasma_manager.player_position
+	var player_ground = Vector3(player_pos.x, 0, player_pos.z)
+	global_position = player_ground
+	
+	# Throttle mesh rebuilds
 	if _pending_update:
 		_update_timer += delta
 		if _update_timer >= UPDATE_INTERVAL:
@@ -143,69 +75,110 @@ func _do_render_update():
 	if not miasma_manager or not mesh_instance:
 		return
 	
-	var blocks = miasma_manager.get_all_blocks()
-	
-	if blocks.size() == 0:
-		mesh_instance.multimesh.instance_count = 0
+	# Get viewport info
+	var viewport = get_viewport()
+	if not viewport:
 		return
 	
-	# First pass: collect all valid blocks (that are actually present)
-	# Use an array to ensure consistent ordering
-	var valid_blocks = []
-	var total_blocks = blocks.size()
-	
-	for tile_pos in blocks.keys():
-		# Check if block is present (true)
-		var block_value = blocks.get(tile_pos)
-		if block_value == true:
-			valid_blocks.append(tile_pos)
-	
-	var valid_count = valid_blocks.size()
-	
-	# Debug: Log block counts on first render
-	if not _initial_render_done:
-		print("MiasmaRenderer: Total blocks in dict: ", total_blocks, " Valid blocks: ", valid_count)
-		if valid_count != total_blocks:
-			print("WARNING: Some blocks are not valid! This might cause rendering issues.")
-		_initial_render_done = true
-	
-	if valid_count == 0:
-		mesh_instance.multimesh.instance_count = 0
+	var camera = viewport.get_camera_3d()
+	if not camera:
 		return
 	
-	# Set instance count to exact number of valid blocks
-	# IMPORTANT: Reset to 0 first on initial render to force full refresh (fixes checkerboard)
-	var multimesh = mesh_instance.multimesh
+	# Get player position (sheet follows player, not camera)
+	var player_pos = miasma_manager.player_position
+	var player_ground = Vector3(player_pos.x, 0, player_pos.z)
+	
+	# Calculate viewport world size from camera
+	var world_width = camera.size
+	var pixel_size = viewport.get_visible_rect().size
+	var world_height = camera.size * (pixel_size.y / pixel_size.x)
+	
+	var tile_size = miasma_manager.get_tile_size()
+	
+	# Sheet dimensions: simple rectangle covering viewport (no rotation, no isometric factor)
+	# This is a flat rectangle on the ground
+	var half_size_x = world_width * 0.5
+	var half_size_z = world_height * 0.5
+	
+	# Calculate how many tiles we need to cover the viewport
+	var tiles_x = int(world_width / tile_size) + 2  # Extra padding
+	var tiles_z = int(world_height / tile_size) + 2
+	
+	# Build mesh: continuous sheet with holes (tiles that are cleared)
+	# Build a rectangle centered on player, covering viewport
+	# For each tile, check if it's cleared in WORLD space
+	
+	var vertices = PackedVector3Array()
+	var indices = PackedInt32Array()
+	var sheet_thickness = 0.1
+	var y_pos = sheet_thickness / 2.0
+	
+	var vertex_index = 0
+	var tiles_rendered = 0
+	
+	# Build mesh tile by tile, skipping cleared tiles
+	# Build a rectangle centered on player, covering viewport
+	# For each tile in the rectangle, check if it's cleared in WORLD space
+	
+	var half_tiles_x = tiles_x / 2
+	var half_tiles_z = tiles_z / 2
+	
+	for tile_x in range(-half_tiles_x, half_tiles_x + 1):
+		for tile_z in range(-half_tiles_z, half_tiles_z + 1):
+			# Calculate world position of this tile (relative to player)
+			var world_x = player_ground.x + (tile_x * tile_size)
+			var world_z = player_ground.z + (tile_z * tile_size)
+			
+			# Convert to tile coordinates in world space (must match clear_area calculation)
+			var world_tile_x = int(world_x / tile_size)
+			var world_tile_z = int(world_z / tile_size)
+			var world_tile_pos = Vector2i(world_tile_x, world_tile_z)
+			
+			# Check if this world position is cleared (holes stay in world space)
+			if miasma_manager.is_cleared(world_tile_x, world_tile_z):
+				continue  # Skip cleared tiles (holes)
+			
+			# Add tile quad (relative to player position, so mesh is centered on player)
+			var local_x = tile_x * tile_size
+			var local_z = tile_z * tile_size
+			
+			# Tile quad vertices (local to player position)
+			var v0 = Vector3(local_x, y_pos, local_z)
+			var v1 = Vector3(local_x + tile_size, y_pos, local_z)
+			var v2 = Vector3(local_x + tile_size, y_pos, local_z + tile_size)
+			var v3 = Vector3(local_x, y_pos, local_z + tile_size)
+			
+			var base = vertex_index
+			vertices.append(v0)
+			vertices.append(v1)
+			vertices.append(v2)
+			vertices.append(v3)
+			
+			# Two triangles per tile
+			indices.append(base + 0)
+			indices.append(base + 1)
+			indices.append(base + 2)
+			indices.append(base + 0)
+			indices.append(base + 2)
+			indices.append(base + 3)
+			
+			vertex_index += 4
+			tiles_rendered += 1
+	
+	# Create mesh
+	var array_mesh = ArrayMesh.new()
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	
+	if vertices.size() > 0:
+		array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	
+	mesh_instance.mesh = array_mesh
+	
+	# Position at player position (ground level) - sheet follows player
+	global_position = player_ground
+	
 	if not _initial_render_done:
-		# On first render, reset to 0 then set to full count to force complete initialization
-		multimesh.instance_count = 0
-	multimesh.instance_count = valid_count
-	
-	# Second pass: set transforms for all valid blocks
-	var tile_x = miasma_manager.MIASMA_TILE_SIZE_X if miasma_manager else MIASMA_TILE_SIZE_X
-	var tile_z = miasma_manager.MIASMA_TILE_SIZE_Z if miasma_manager else MIASMA_TILE_SIZE_Z
-	var sheet_thickness = 0.1  # Thin 2D sheet
-	
-	# Set all transforms - ensure every instance gets a valid transform
-	for index in range(valid_count):
-		var tile_pos = valid_blocks[index]
-		
-		# Convert tile position to world position (2D sheet on ground)
-		var world_x = tile_pos.x * tile_x
-		var world_z = tile_pos.y * tile_z
-		var world_y = sheet_thickness / 2.0  # Flat on ground (slightly above to avoid z-fighting)
-		
-		var block_transform = Transform3D(
-			Basis(),
-			Vector3(world_x, world_y, world_z)
-		)
-		
-		multimesh.set_instance_transform(index, block_transform)
-	
-	# Ensure mesh instance is visible
-	mesh_instance.visible = true
-	
-	# Debug: Verify we set all transforms
-	if not _initial_render_done:
-		print("MiasmaRenderer: Set ", valid_count, " transforms in multimesh (instance_count: ", multimesh.instance_count, ")")
-	# Removed debug prints for performance
+		print("MiasmaRenderer: Rendered ", tiles_rendered, " fog tiles (sheet follows player at: ", player_ground, ")")
