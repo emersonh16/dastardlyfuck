@@ -90,6 +90,8 @@ func update_player_position(new_pos: Vector3):
 	
 	# Only update if player crossed a tile boundary
 	if new_center_x != old_center_x or new_center_z != old_center_z:
+		# DIAGNOSTIC: Print player tile position
+		print("Player tile: (", new_center_x, ", ", new_center_z, ") world: ", new_pos)
 		player_position = new_pos
 		fill_area_around_player()
 	else:

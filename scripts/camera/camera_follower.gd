@@ -55,15 +55,14 @@ func _process(delta):
 	# Smooth interpolation for position (but keep camera angle fixed)
 	position = position.lerp(desired_pos, 10.0 * delta)
 	
-	# Always look at target (but with fixed rotation, no jitter)
-	# Use fixed up vector to prevent rotation
+	# FIXED: Use look_at() to point at target, then lock rotation
 	look_at(target_pos, Vector3.UP)
 	
-	# Lock rotation to prevent any drift
-	# Ensure rotation stays at fixed isometric angle
-	var fixed_rotation = Vector3(
-		deg_to_rad(30.0),  # Elevation
-		deg_to_rad(45.0),  # Azimuth
-		0.0
-	)
-	# Don't directly set rotation, but ensure look_at uses consistent up vector
+	# Immediately lock rotation to prevent drift
+	# Calculate fixed rotation from isometric angles
+	# The camera should always have the same rotation regardless of position
+	var fixed_rotation_y = azimuth  # 45 degrees around Y
+	var fixed_rotation_x = -elevation  # -30 degrees around X (negative because we're looking down)
+	
+	# Set fixed rotation (this prevents drift while maintaining correct orientation)
+	rotation = Vector3(fixed_rotation_x, fixed_rotation_y, 0.0)

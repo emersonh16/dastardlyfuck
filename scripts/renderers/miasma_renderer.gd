@@ -145,6 +145,10 @@ func _do_render_update():
 		var world_z = tile_pos.y * tile_z
 		var world_y = block_h / 2.0  # Center block on ground
 		
+		# DIAGNOSTIC: Print first 5 blocks
+		if index < 5:
+			print("Block ", index, ": tile_pos=", tile_pos, " world_pos=(", world_x, ", ", world_z, ")")
+		
 		var block_transform = Transform3D(
 			Basis(),
 			Vector3(world_x, world_y, world_z)
