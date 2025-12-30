@@ -5,6 +5,7 @@ extends Node3D
 
 var mountain_manager: Node = null
 var mountain_mesh_instances: Dictionary = {}  # mountain_id -> MeshInstance3D
+var mountain_collision_bodies: Dictionary = {}  # mountain_id -> StaticBody3D
 
 # Materials per biome
 var mountain_materials: Dictionary = {}
@@ -123,15 +124,23 @@ func _update_mountains():
 			to_remove.append(mountain_id)
 	
 	for mountain_id in to_remove:
-		var mesh_instance = mountain_mesh_instances[mountain_id]
+		var mesh_instance = mountain_mesh_instances.get(mountain_id)
 		if mesh_instance:
 			mesh_instance.queue_free()
 		mountain_mesh_instances.erase(mountain_id)
+		
+		var collision_body = mountain_collision_bodies.get(mountain_id)
+		if collision_body:
+			collision_body.queue_free()
+		mountain_collision_bodies.erase(mountain_id)
 
 func _create_mountain_mesh(mountain: Dictionary):
 	var mesh_instance = MeshInstance3D.new()
 	add_child(mesh_instance)
 	mountain_mesh_instances[mountain.id] = mesh_instance
+	
+	# Create collision body for this mountain
+	_create_mountain_collision(mountain)
 	
 	# Position
 	mesh_instance.global_position = Vector3(mountain.x, 0, mountain.z)
@@ -211,6 +220,44 @@ func _create_mountain_mesh(mountain: Dictionary):
 	array_mesh.surface_set_material(0, material)
 	
 	mesh_instance.mesh = array_mesh
+
+func _create_mountain_collision(mountain: Dictionary):
+	# Create StaticBody3D for collision
+	var static_body = StaticBody3D.new()
+	add_child(static_body)
+	mountain_collision_bodies[mountain.id] = static_body
+	
+	# Position at mountain center
+	static_body.global_position = Vector3(mountain.x, 0, mountain.z)
+	
+	# Create collision shapes for each cell (especially tall cells)
+	var cells = mountain.cells
+	var tall_cells = mountain.tall
+	var cell_size = 2.0  # CELL_SIZE
+	
+	# Create collision shapes for all cells (or just tall cells for performance)
+	# For now, create collision for all cells to ensure proper blocking
+	for cell in cells:
+		var dx = cell.dx
+		var dz = cell.dy  # Note: cell uses dy for Z
+		
+		# Create box collision shape for this cell
+		var collision_shape = CollisionShape3D.new()
+		var box_shape = BoxShape3D.new()
+		
+		# Determine height based on whether it's a tall cell
+		var cell_key = "%d,%d" % [int(dx), int(dz)]
+		var is_tall = tall_cells.has(cell_key)
+		var height = 8.0 if is_tall else 2.0
+		
+		# Box size matches the cell
+		box_shape.size = Vector3(cell_size, height, cell_size)
+		collision_shape.shape = box_shape
+		
+		# Position relative to mountain center
+		collision_shape.position = Vector3(dx, height * 0.5, dz)
+		
+		static_body.add_child(collision_shape)
 
 func _on_mountains_changed():
 	# Re-render when mountains change
