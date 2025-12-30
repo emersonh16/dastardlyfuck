@@ -12,6 +12,9 @@ var world_position: Vector3 = Vector3.ZERO
 # Debug trail
 var trail: Node3D = null
 
+# Visual reference (for future sprite support)
+var visual_node: Node3D = null
+
 func _ready():
 	# Get starting position from WorldManager (always in meadow)
 	var world_manager = get_node_or_null("/root/WorldManager")
@@ -31,6 +34,9 @@ func _ready():
 	trail = get_node_or_null("../PlayerTrail")
 	if not trail:
 		trail = get_node_or_null("../../PlayerTrail")
+	
+	# Get visual node reference (for future animations/effects)
+	visual_node = get_node_or_null("Visual")
 
 func _physics_process(_delta):
 	# Get input - WASD relative to camera (screen space)
@@ -88,6 +94,10 @@ func _physics_process(_delta):
 	if move_dir.length() > 0:
 		move_dir = move_dir.normalized()
 		velocity = move_dir * MOVE_SPEED
+		
+		# Rotate sprite to face movement direction (optional, for isometric view)
+		# The sprite is already rotated for isometric, but we could add slight rotation
+		# based on movement direction if needed
 	else:
 		velocity = Vector3.ZERO
 	
