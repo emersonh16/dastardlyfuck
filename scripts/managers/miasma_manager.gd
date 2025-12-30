@@ -83,24 +83,38 @@ func update_player_position(new_pos: Vector3):
 
 # Clear miasma in area (for beam clearing)
 # Returns number of tiles cleared
+# Matches reference: uses tile centers for distance calculation
 func clear_area(world_pos: Vector3, radius: float) -> int:
-	var center_tile_x = int(world_pos.x / MIASMA_TILE_SIZE)
-	var center_tile_z = int(world_pos.z / MIASMA_TILE_SIZE)
+	# Snap world position (like reference snapWorld)
+	var snapped_x = world_pos.x
+	var snapped_z = world_pos.z
+	
+	# Convert to tile coordinates
+	var center_tile_x = int(snapped_x / MIASMA_TILE_SIZE)
+	var center_tile_z = int(snapped_z / MIASMA_TILE_SIZE)
 	var radius_tiles = int(radius / MIASMA_TILE_SIZE) + 1
 	var radius_sq = radius * radius
 	
 	var cleared = 0
 	var tiles_to_clear = []
 	
-	# Find all tiles in radius
-	for x in range(-radius_tiles, radius_tiles + 1):
-		for z in range(-radius_tiles, radius_tiles + 1):
-			var dx = x * MIASMA_TILE_SIZE
-			var dz = z * MIASMA_TILE_SIZE
-			var dist_sq = dx * dx + dz * dz
+	# Find all tiles in radius - use tile CENTERS for distance check (like reference)
+	for dx in range(-radius_tiles, radius_tiles + 1):
+		for dz in range(-radius_tiles, radius_tiles + 1):
+			var tx = center_tile_x + dx
+			var tz = center_tile_z + dz
+			
+			# Calculate tile CENTER position (like reference: (tx + 0.5) * TILE_SIZE)
+			var tile_center_x = (tx + 0.5) * MIASMA_TILE_SIZE
+			var tile_center_z = (tz + 0.5) * MIASMA_TILE_SIZE
+			
+			# Distance from world_pos to tile center
+			var dxw = tile_center_x - snapped_x
+			var dzw = tile_center_z - snapped_z
+			var dist_sq = dxw * dxw + dzw * dzw
 			
 			if dist_sq <= radius_sq:
-				var tile_pos = Vector2i(center_tile_x + x, center_tile_z + z)
+				var tile_pos = Vector2i(tx, tz)
 				# Only clear if not already cleared
 				if not cleared_tiles.has(tile_pos):
 					tiles_to_clear.append(tile_pos)
@@ -210,24 +224,25 @@ func _process_regrowth():
 	var scanned = 0
 	
 	# Scan frontier for regrowth candidates
-	# OPTIMIZATION: Convert to array once and cache lookups
+	# Match reference logic order: check boundary first, then area, then timing
 	var frontier_keys = frontier.keys()
 	for tile_pos in frontier_keys:
 		if budget <= 0 or scanned >= MAX_REGROW_SCAN_PER_FRAME:
 			break
 		scanned += 1
 		
-		# OPTIMIZATION: Get time_cleared once (cache the lookup)
+		# Get time_cleared (cache the lookup)
 		var time_cleared = cleared_tiles.get(tile_pos)
 		if time_cleared == null:
 			# Tile no longer cleared - remove from frontier
 			frontier.erase(tile_pos)
 			continue
 		
+		# Get world tile coordinates (in our system, frontier uses world coords directly)
 		var tx = tile_pos.x
 		var tz = tile_pos.y
 		
-		# Forget tiles far from viewport
+		# Forget tiles far from viewport (check first, like reference)
 		if tx < forget_left or tx >= forget_right or tz < forget_top or tz >= forget_bottom:
 			to_forget.append(tile_pos)
 			continue
@@ -236,16 +251,17 @@ func _process_regrowth():
 		if tx < reg_left or tx >= reg_right or tz < reg_top or tz >= reg_bottom:
 			continue
 		
-		# Check if still on boundary (only if in regrow area)
+		# Check if still on boundary (match reference: check boundary before timing)
+		# Reference checks isBoundary(fx, fy) using frontier coords, but we use world coords
 		if not _is_boundary(tile_pos):
 			frontier.erase(tile_pos)
 			continue
 		
-		# Check if enough time has passed (use cached time_cleared)
+		# Check if enough time has passed (match reference: delay check)
 		if game_time - time_cleared < REGROW_DELAY:
 			continue
 		
-		# Random chance to regrow
+		# Random chance to regrow (match reference: chance * speedFactor)
 		if randf() < REGROW_CHANCE:
 			to_grow.append(tile_pos)
 			budget -= 1
