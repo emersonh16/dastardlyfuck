@@ -37,6 +37,33 @@ func _ready():
 	
 	# Get visual node reference (for future animations/effects)
 	visual_node = get_node_or_null("Visual")
+	
+	# Load initial chunks around starting position (reuse world_manager from above)
+	world_manager = get_node_or_null("/root/WorldManager")
+	if world_manager:
+		# Wait a frame for WorldManager to finish initializing
+		await get_tree().process_frame
+		_load_chunks_around_player(world_manager, world_position)
+
+# Load chunks around player position (with buffer)
+func _load_chunks_around_player(world_manager: Node, player_pos: Vector3):
+	if not world_manager:
+		return
+	
+	# Load chunks in a 3x3 grid around the player (1 chunk buffer in each direction)
+	var chunk_size_world_units = 64.0 * 64.0  # CHUNK_SIZE_TILES * GROUND_TILE_SIZE
+	var chunk_x = int(player_pos.x / chunk_size_world_units)
+	var chunk_z = int(player_pos.z / chunk_size_world_units)
+	
+	# Load 3x3 grid of chunks
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			var chunk_pos = Vector3(
+				(chunk_x + dx) * chunk_size_world_units + chunk_size_world_units * 0.5,
+				0,
+				(chunk_z + dz) * chunk_size_world_units + chunk_size_world_units * 0.5
+			)
+			world_manager.get_chunk_at(chunk_pos)
 
 func _physics_process(_delta):
 	# Get input - WASD relative to camera (screen space)
@@ -115,3 +142,8 @@ func _physics_process(_delta):
 	var manager = get_node_or_null("/root/MiasmaManager")
 	if manager:
 		manager.update_player_position(world_position)
+	
+	# Load chunks around player (for rock/mountain generation)
+	var world_manager = get_node_or_null("/root/WorldManager")
+	if world_manager:
+		_load_chunks_around_player(world_manager, world_position)

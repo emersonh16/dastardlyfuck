@@ -65,25 +65,9 @@ func initialize_world(seed: int):
 	print("WorldManager: Generated world with %d Voronoi points" % voronoi_points.size())
 	print("WorldManager: Assigned %d biomes" % biome_assignments.size())
 	
-	# Generate mountains in the world
-	var mountain_manager = get_node_or_null("/root/MountainManager")
-	if mountain_manager:
-		var world_size_world_units = WORLD_SIZE_TILES * GROUND_TILE_SIZE
-		mountain_manager.generate_mountains_in_area(
-			0.0, world_size_world_units,
-			0.0, world_size_world_units
-		)
-		print("WorldManager: Generated mountains")
-	
-	# Generate rocks in the world
-	var rock_manager = get_node_or_null("/root/RockManager")
-	if rock_manager:
-		var world_size_world_units = WORLD_SIZE_TILES * GROUND_TILE_SIZE
-		rock_manager.generate_rocks_in_area(
-			0.0, world_size_world_units,
-			0.0, world_size_world_units
-		)
-		print("WorldManager: Generated rocks")
+	# NOTE: Mountains and rocks should be generated lazily as chunks are loaded,
+	# not eagerly during world initialization. This prevents slow boot times.
+	# They will be generated on-demand when get_chunk_at() is called for specific areas.
 	
 	world_generated.emit()
 
@@ -154,6 +138,18 @@ func generate_chunk(chunk_key: String, world_pos: Vector3) -> Dictionary:
 	# Calculate chunk bounds in world units
 	var chunk_start_x: float = chunk_x * GROUND_TILE_SIZE * CHUNK_SIZE_TILES
 	var chunk_start_z: float = chunk_z * GROUND_TILE_SIZE * CHUNK_SIZE_TILES
+	var chunk_size_world_units: float = CHUNK_SIZE_TILES * GROUND_TILE_SIZE
+	var chunk_end_x: float = chunk_start_x + chunk_size_world_units
+	var chunk_end_z: float = chunk_start_z + chunk_size_world_units
+	
+	# Generate rocks and mountains for this chunk (lazy generation)
+	var rock_manager = get_node_or_null("/root/RockManager")
+	if rock_manager:
+		rock_manager.generate_rocks_in_area(chunk_start_x, chunk_end_x, chunk_start_z, chunk_end_z)
+	
+	var mountain_manager = get_node_or_null("/root/MountainManager")
+	if mountain_manager:
+		mountain_manager.generate_mountains_in_area(chunk_start_x, chunk_end_x, chunk_start_z, chunk_end_z)
 	
 	# For now, chunks just store their bounds
 	# Future: Could store biome map, decorations, etc.
