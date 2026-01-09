@@ -4,13 +4,28 @@ extends Node3D
 # Mountains block miasma (tall cells)
 
 var mountain_manager: Node = null
-var mountain_mesh_instances: Dictionary = {}  # mountain_id -> MeshInstance3D
+var mountain_meshes: Dictionary = {}  # mountain_id -> ArrayMesh (cached meshes)
 var mountain_collision_bodies: Dictionary = {}  # mountain_id -> StaticBody3D
+
+# MultiMeshInstance3D for batched rendering (1 draw call instead of 20+)
+var multimesh_instance: MultiMeshInstance3D = null
 
 # Materials per biome
 var mountain_materials: Dictionary = {}
 
+# Performance optimization: only update when bounds change significantly
+var _last_bounds: Dictionary = {}
+const BOUNDS_UPDATE_THRESHOLD: float = 100.0  # Only update if bounds moved by this much
+
+# Track which mountains are currently in MultiMesh
+var _multimesh_mountain_ids: Array = []
+
 func _ready():
+	# DISABLED: Mountains completely disabled for performance
+	set_process(false)
+	set_physics_process(false)
+	return
+	
 	mountain_manager = get_node_or_null("/root/MountainManager")
 	if not mountain_manager:
 		push_error("MountainRenderer: MountainManager not found!")
@@ -18,6 +33,10 @@ func _ready():
 	
 	# Create materials for each biome
 	_create_biome_materials()
+	
+	# Create MultiMeshInstance3D for batched rendering
+	multimesh_instance = MultiMeshInstance3D.new()
+	add_child(multimesh_instance)
 	
 	# Connect to mountain manager signals
 	if mountain_manager.has_signal("mountains_changed"):
@@ -46,14 +65,35 @@ func _create_biome_materials():
 		mountain_materials[biome_type] = material
 
 func _process(_delta):
-	# Update mountains in viewport
+	# DISABLED: Mountains completely disabled for performance
+	return
+	# Only update when bounds change significantly (performance optimization)
 	_update_mountains()
 
 func _update_mountains():
 	if not mountain_manager:
 		return
 	
-	# Get viewport bounds
+	# EARLY EXIT: Check bounds first before expensive viewport calculations
+	# Use cached player position for quick bounds estimate
+	var miasma_manager = get_node_or_null("/root/MiasmaManager")
+	if miasma_manager:
+		var player_pos = miasma_manager.player_position
+		var estimated_min_x = player_pos.x - 500.0  # Rough estimate
+		var estimated_max_x = player_pos.x + 500.0
+		var estimated_min_z = player_pos.z - 500.0
+		var estimated_max_z = player_pos.z + 500.0
+		
+		# Quick check: if bounds haven't changed much, skip expensive calculations
+		if _last_bounds.has("min_x"):
+			var bounds_moved = abs(_last_bounds.min_x - estimated_min_x) > BOUNDS_UPDATE_THRESHOLD or \
+							   abs(_last_bounds.max_x - estimated_max_x) > BOUNDS_UPDATE_THRESHOLD or \
+							   abs(_last_bounds.min_z - estimated_min_z) > BOUNDS_UPDATE_THRESHOLD or \
+							   abs(_last_bounds.max_z - estimated_max_z) > BOUNDS_UPDATE_THRESHOLD
+			if not bounds_moved:
+				return  # Skip expensive viewport calculations
+	
+	# Get viewport bounds (expensive - only do if bounds changed)
 	var viewport = get_viewport()
 	if not viewport:
 		return
@@ -102,49 +142,58 @@ func _update_mountains():
 	min_z -= padding
 	max_z += padding
 	
+	# Final bounds check (after expensive calculation)
+	if _last_bounds.has("min_x"):
+		var bounds_moved = abs(_last_bounds.min_x - min_x) > BOUNDS_UPDATE_THRESHOLD or \
+						   abs(_last_bounds.max_x - max_x) > BOUNDS_UPDATE_THRESHOLD or \
+						   abs(_last_bounds.min_z - min_z) > BOUNDS_UPDATE_THRESHOLD or \
+						   abs(_last_bounds.max_z - max_z) > BOUNDS_UPDATE_THRESHOLD
+		if not bounds_moved:
+			return  # Bounds haven't changed enough, skip update
+	
+	# Store current bounds
+	_last_bounds = {"min_x": min_x, "max_x": max_x, "min_z": min_z, "max_z": max_z}
+	
 	# Get mountains in area
 	var mountains = mountain_manager.get_mountains_in_area(min_x, max_x, min_z, max_z)
 	
-	# Track which mountains we've rendered
-	var rendered_ids = {}
+	# Track which mountains should be visible
+	var visible_mountain_ids = {}
+	var mountains_changed = false
 	
-	# Render mountains
+	# Ensure meshes exist for visible mountains and create collision if needed
 	for mountain in mountains:
 		var mountain_id = mountain.id
-		rendered_ids[mountain_id] = true
+		visible_mountain_ids[mountain_id] = true
 		
-		# Create or update mesh instance
-		if not mountain_mesh_instances.has(mountain_id):
-			_create_mountain_mesh(mountain)
+		# Create mesh if it doesn't exist (cache it)
+		if not mountain_meshes.has(mountain_id):
+			mountain_meshes[mountain_id] = _build_mountain_mesh(mountain)
+			mountains_changed = true
+		
+		# Create collision if it doesn't exist
+		if not mountain_collision_bodies.has(mountain_id):
+			_create_mountain_collision(mountain)
 	
-	# Remove mountains that are no longer visible
+	# Remove collision bodies for mountains that are no longer visible
 	var to_remove = []
-	for mountain_id in mountain_mesh_instances:
-		if not rendered_ids.has(mountain_id):
+	for mountain_id in mountain_collision_bodies:
+		if not visible_mountain_ids.has(mountain_id):
 			to_remove.append(mountain_id)
 	
 	for mountain_id in to_remove:
-		var mesh_instance = mountain_mesh_instances.get(mountain_id)
-		if mesh_instance:
-			mesh_instance.queue_free()
-		mountain_mesh_instances.erase(mountain_id)
-		
 		var collision_body = mountain_collision_bodies.get(mountain_id)
 		if collision_body:
 			collision_body.queue_free()
 		mountain_collision_bodies.erase(mountain_id)
+		mountains_changed = true
+	
+	# Rebuild MultiMesh if mountains changed
+	if mountains_changed or _multimesh_mountain_ids.size() != visible_mountain_ids.size():
+		_rebuild_multimesh(mountains)
 
-func _create_mountain_mesh(mountain: Dictionary):
-	var mesh_instance = MeshInstance3D.new()
-	add_child(mesh_instance)
-	mountain_mesh_instances[mountain.id] = mesh_instance
-	
-	# Create collision body for this mountain
-	_create_mountain_collision(mountain)
-	
-	# Position
-	mesh_instance.global_position = Vector3(mountain.x, 0, mountain.z)
-	
+# Build mountain mesh (returns ArrayMesh, doesn't create node)
+func _build_mountain_mesh(mountain: Dictionary) -> ArrayMesh:
 	# Get biome material
 	var biome_id = mountain.biome_id
 	var material = mountain_materials.get(biome_id, mountain_materials.values()[0])
@@ -173,7 +222,6 @@ func _create_mountain_mesh(mountain: Dictionary):
 		var half_size = cell_size * 0.5
 		var x = dx
 		var z = dz
-		var _y = height * 0.5
 		
 		# Box vertices (bottom face, then top face)
 		var v0 = Vector3(x - half_size, 0, z - half_size)
@@ -219,7 +267,90 @@ func _create_mountain_mesh(mountain: Dictionary):
 	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	array_mesh.surface_set_material(0, material)
 	
-	mesh_instance.mesh = array_mesh
+	return array_mesh
+
+# Rebuild MultiMeshInstance3D with all visible mountains
+func _rebuild_multimesh(mountains: Array):
+	if not multimesh_instance or mountains.is_empty():
+		if multimesh_instance:
+			multimesh_instance.multimesh = null
+		_multimesh_mountain_ids.clear()
+		return
+	
+	# Create template mesh (representative mountain shape)
+	var template_mesh = _create_template_mountain_mesh()
+	
+	# Create MultiMesh
+	var multimesh = MultiMesh.new()
+	multimesh.mesh = template_mesh
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D  # Must set BEFORE instance_count
+	multimesh.instance_count = mountains.size()
+	# color_format not needed - we don't use per-instance colors
+	
+	# Set transforms for each mountain
+	_multimesh_mountain_ids.clear()
+	
+	for i in range(mountains.size()):
+		var mountain = mountains[i]
+		_multimesh_mountain_ids.append(mountain.id)
+		
+		# Create transform (position only)
+		var transform = Transform3D.IDENTITY
+		transform.origin = Vector3(mountain.x, 0, mountain.z)
+		multimesh.set_instance_transform(i, transform)
+	
+	multimesh_instance.multimesh = multimesh
+
+# Create a template mesh for MultiMesh (simple representative mountain)
+func _create_template_mountain_mesh() -> ArrayMesh:
+	# Create a simple box that represents an average mountain
+	var material = mountain_materials.values()[0] if mountain_materials.size() > 0 else null
+	if not material:
+		material = StandardMaterial3D.new()
+		material.albedo_color = Color(0.3, 0.3, 0.3)
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	
+	# Simple box mesh (representative of average mountain size)
+	var size = 64.0  # Average mountain envelope radius
+	var height = 5.0  # Average height
+	
+	var vertices = PackedVector3Array([
+		# Bottom face
+		Vector3(-size, 0, -size),
+		Vector3(size, 0, -size),
+		Vector3(size, 0, size),
+		Vector3(-size, 0, size),
+		# Top face
+		Vector3(-size, height, -size),
+		Vector3(size, height, -size),
+		Vector3(size, height, size),
+		Vector3(-size, height, size)
+	])
+	
+	var indices = PackedInt32Array([
+		# Bottom
+		0, 2, 1, 0, 3, 2,
+		# Top
+		4, 5, 6, 4, 6, 7,
+		# Front
+		0, 1, 5, 0, 5, 4,
+		# Back
+		3, 7, 6, 3, 6, 2,
+		# Left
+		0, 4, 7, 0, 7, 3,
+		# Right
+		1, 2, 6, 1, 6, 5
+	])
+	
+	var array_mesh = ArrayMesh.new()
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	array_mesh.surface_set_material(0, material)
+	
+	return array_mesh
 
 func _create_mountain_collision(mountain: Dictionary):
 	# Create StaticBody3D for collision
@@ -230,35 +361,78 @@ func _create_mountain_collision(mountain: Dictionary):
 	# Position at mountain center
 	static_body.global_position = Vector3(mountain.x, 0, mountain.z)
 	
-	# Create collision shapes for each cell (especially tall cells)
+	# OPTIMIZATION: Use single ConcavePolygonShape3D (trimesh) instead of per-cell shapes
+	# This gives exact collision with much better performance (1 shape vs 100-300 shapes)
 	var cells = mountain.cells
 	var tall_cells = mountain.tall
 	var cell_size = 2.0  # CELL_SIZE
 	
-	# Create collision shapes for all cells (or just tall cells for performance)
-	# For now, create collision for all cells to ensure proper blocking
+	# Build collision vertices and indices from cells (reuse mesh building logic)
+	var collision_vertices = PackedVector3Array()
+	var collision_indices = PackedInt32Array()
+	
 	for cell in cells:
 		var dx = cell.dx
 		var dz = cell.dy  # Note: cell uses dy for Z
 		
-		# Create box collision shape for this cell
-		var collision_shape = CollisionShape3D.new()
-		var box_shape = BoxShape3D.new()
-		
-		# Determine height based on whether it's a tall cell
 		var cell_key = "%d,%d" % [int(dx), int(dz)]
 		var is_tall = tall_cells.has(cell_key)
 		var height = 8.0 if is_tall else 2.0
 		
-		# Box size matches the cell
-		box_shape.size = Vector3(cell_size, height, cell_size)
-		collision_shape.shape = box_shape
+		# Create box vertices for this cell (same as mesh)
+		var half_size = cell_size * 0.5
+		var x = dx
+		var z = dz
 		
-		# Position relative to mountain center
-		collision_shape.position = Vector3(dx, height * 0.5, dz)
+		var v0 = Vector3(x - half_size, 0, z - half_size)
+		var v1 = Vector3(x + half_size, 0, z - half_size)
+		var v2 = Vector3(x + half_size, 0, z + half_size)
+		var v3 = Vector3(x - half_size, 0, z + half_size)
+		var v4 = Vector3(x - half_size, height, z - half_size)
+		var v5 = Vector3(x + half_size, height, z - half_size)
+		var v6 = Vector3(x + half_size, height, z + half_size)
+		var v7 = Vector3(x - half_size, height, z + half_size)
 		
-		static_body.add_child(collision_shape)
+		var base_idx = collision_vertices.size()
+		collision_vertices.append_array([v0, v1, v2, v3, v4, v5, v6, v7])
+		
+		# Box faces (12 triangles = 36 indices)
+		# Bottom face
+		collision_indices.append_array([base_idx + 0, base_idx + 2, base_idx + 1])
+		collision_indices.append_array([base_idx + 0, base_idx + 3, base_idx + 2])
+		# Top face
+		collision_indices.append_array([base_idx + 4, base_idx + 5, base_idx + 6])
+		collision_indices.append_array([base_idx + 4, base_idx + 6, base_idx + 7])
+		# Front face
+		collision_indices.append_array([base_idx + 0, base_idx + 1, base_idx + 5])
+		collision_indices.append_array([base_idx + 0, base_idx + 5, base_idx + 4])
+		# Back face
+		collision_indices.append_array([base_idx + 3, base_idx + 7, base_idx + 6])
+		collision_indices.append_array([base_idx + 3, base_idx + 6, base_idx + 2])
+		# Left face
+		collision_indices.append_array([base_idx + 0, base_idx + 4, base_idx + 7])
+		collision_indices.append_array([base_idx + 0, base_idx + 7, base_idx + 3])
+		# Right face
+		collision_indices.append_array([base_idx + 1, base_idx + 2, base_idx + 6])
+		collision_indices.append_array([base_idx + 1, base_idx + 6, base_idx + 5])
+	
+	# Create single collision shape using trimesh (exact collision, much faster)
+	# Convert indexed vertices to flat triangle list (every 3 vertices = 1 triangle)
+	var triangle_vertices = PackedVector3Array()
+	for i in range(0, collision_indices.size(), 3):
+		if i + 2 < collision_indices.size():
+			triangle_vertices.append(collision_vertices[collision_indices[i]])
+			triangle_vertices.append(collision_vertices[collision_indices[i + 1]])
+			triangle_vertices.append(collision_vertices[collision_indices[i + 2]])
+	
+	var collision_shape = CollisionShape3D.new()
+	var trimesh_shape = ConcavePolygonShape3D.new()
+	trimesh_shape.set_faces(triangle_vertices)
+	collision_shape.shape = trimesh_shape
+	static_body.add_child(collision_shape)
 
 func _on_mountains_changed():
-	# Re-render when mountains change
-	_update_mountains()
+	# Signal that mountains changed - let next frame's _process() handle the update
+	# Don't call _update_mountains() here to avoid expensive viewport calculations
+	# The bounds check in _process() will handle it efficiently
+	pass

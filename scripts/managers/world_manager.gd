@@ -27,6 +27,10 @@ var voronoi_points: Array[Vector2] = []  # Voronoi seed points (in ground tile c
 var biome_assignments: Dictionary = {}  # Voronoi cell index -> BiomeType
 var loaded_chunks: Dictionary = {}  # Chunk key ("x,z") -> ChunkData (for caching)
 
+# Chunk loading
+var last_player_chunk_key: String = ""  # Track last chunk player was in
+const CHUNK_LOAD_RADIUS: int = 2  # Load chunks within this radius of player chunk
+
 # Random number generator (for deterministic generation)
 var rng: RandomNumberGenerator = null
 
@@ -65,27 +69,13 @@ func initialize_world(seed: int):
 	print("WorldManager: Generated world with %d Voronoi points" % voronoi_points.size())
 	print("WorldManager: Assigned %d biomes" % biome_assignments.size())
 	
-	# Generate mountains in the world
-	var mountain_manager = get_node_or_null("/root/MountainManager")
-	if mountain_manager:
-		var world_size_world_units = WORLD_SIZE_TILES * GROUND_TILE_SIZE
-		mountain_manager.generate_mountains_in_area(
-			0.0, world_size_world_units,
-			0.0, world_size_world_units
-		)
-		print("WorldManager: Generated mountains")
-	
-	# Generate rocks in the world
-	var rock_manager = get_node_or_null("/root/RockManager")
-	if rock_manager:
-		var world_size_world_units = WORLD_SIZE_TILES * GROUND_TILE_SIZE
-		rock_manager.generate_rocks_in_area(
-			0.0, world_size_world_units,
-			0.0, world_size_world_units
-		)
-		print("WorldManager: Generated rocks")
+	# NOTE: Rocks and mountains are now generated on-demand per chunk
+	# This prevents blocking startup with world-wide generation
 	
 	world_generated.emit()
+	
+	# Load initial chunks around starting position (after a frame delay)
+	call_deferred("_load_initial_chunks")
 
 # Get biome at world position
 func get_biome_at(world_pos: Vector3) -> BiomeType:
@@ -154,17 +144,37 @@ func generate_chunk(chunk_key: String, world_pos: Vector3) -> Dictionary:
 	# Calculate chunk bounds in world units
 	var chunk_start_x: float = chunk_x * GROUND_TILE_SIZE * CHUNK_SIZE_TILES
 	var chunk_start_z: float = chunk_z * GROUND_TILE_SIZE * CHUNK_SIZE_TILES
+	var chunk_size_world_units: float = CHUNK_SIZE_TILES * GROUND_TILE_SIZE
+	var chunk_end_x: float = chunk_start_x + chunk_size_world_units
+	var chunk_end_z: float = chunk_start_z + chunk_size_world_units
 	
 	# For now, chunks just store their bounds
 	# Future: Could store biome map, decorations, etc.
-	return {
+	var chunk_data = {
 		"key": chunk_key,
 		"chunk_x": chunk_x,
 		"chunk_z": chunk_z,
 		"start_x": chunk_start_x,
 		"start_z": chunk_start_z,
+		"end_x": chunk_end_x,
+		"end_z": chunk_end_z,
 		"size": CHUNK_SIZE_TILES
 	}
+	
+	# Rocks and mountains disabled for performance
+	# call_deferred("_generate_chunk_objects", chunk_data)
+	
+	return chunk_data
+
+# Generate rocks and mountains for a chunk (DISABLED)
+# func _generate_chunk_objects(chunk_data: Dictionary):
+# 	var rock_manager = get_node_or_null("/root/RockManager")
+# 	if rock_manager:
+# 		rock_manager.generate_rocks_for_chunk(chunk_data)
+# 	
+# 	var mountain_manager = get_node_or_null("/root/MountainManager")
+# 	if mountain_manager:
+# 		mountain_manager.generate_mountains_for_chunk(chunk_data)
 
 # Get player starting position (always in meadow)
 func get_starting_position() -> Vector3:
@@ -188,6 +198,45 @@ func get_starting_position() -> Vector3:
 	var world_z: float = meadow_point.y * GROUND_TILE_SIZE
 	
 	return Vector3(world_x, 0.0, world_z)
+
+# Load chunks around a position (called when player moves)
+func load_chunks_around_position(player_pos: Vector3):
+	var player_chunk_key = get_chunk_key(player_pos)
+	
+	# Only update if player moved to a different chunk
+	if player_chunk_key == last_player_chunk_key:
+		return
+	
+	last_player_chunk_key = player_chunk_key
+	
+	# Parse player chunk coordinates
+	var parts = player_chunk_key.split(",")
+	var player_chunk_x: int = int(parts[0])
+	var player_chunk_z: int = int(parts[1])
+	
+	# Load chunks in radius around player
+	for dx in range(-CHUNK_LOAD_RADIUS, CHUNK_LOAD_RADIUS + 1):
+		for dz in range(-CHUNK_LOAD_RADIUS, CHUNK_LOAD_RADIUS + 1):
+			var chunk_x = player_chunk_x + dx
+			var chunk_z = player_chunk_z + dz
+			var chunk_key = "%d,%d" % [chunk_x, chunk_z]
+			
+			# Load chunk if not already loaded
+			if not loaded_chunks.has(chunk_key):
+				var chunk_world_pos = Vector3(
+					chunk_x * GROUND_TILE_SIZE * CHUNK_SIZE_TILES + (GROUND_TILE_SIZE * CHUNK_SIZE_TILES * 0.5),
+					0.0,
+					chunk_z * GROUND_TILE_SIZE * CHUNK_SIZE_TILES + (GROUND_TILE_SIZE * CHUNK_SIZE_TILES * 0.5)
+				)
+				get_chunk_at(chunk_world_pos)
+	
+	# Unload distant chunks
+	unload_distant_chunks(player_pos, CHUNK_LOAD_RADIUS + 1)
+
+# Load initial chunks around starting position
+func _load_initial_chunks():
+	var starting_pos = get_starting_position()
+	load_chunks_around_position(starting_pos)
 
 # Unload chunks far from position (cleanup)
 func unload_distant_chunks(player_pos: Vector3, keep_distance_chunks: int = 5):

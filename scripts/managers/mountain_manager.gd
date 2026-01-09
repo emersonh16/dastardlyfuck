@@ -23,6 +23,9 @@ var next_mountain_id: int = 0
 # Spatial hash for quick lookups (chunk-based)
 var mountain_chunks: Dictionary = {}  # "chunk_x,chunk_z" -> Array[mountain_ids]
 
+# Track which chunks have been generated (to prevent duplicate generation)
+var generated_chunks: Dictionary = {}  # "chunk_x,chunk_z" -> bool
+
 var world_manager: Node = null
 var wind_manager: Node = null
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -124,12 +127,122 @@ func spawn_mountain(world_x: float, world_z: float, biome_id: int = -1) -> int:
 	mountains_changed.emit()
 	return mountain_id
 
-# Generate mountains in an area (for world generation)
-func generate_mountains_in_area(min_x: float, max_x: float, min_z: float, max_z: float):
+# Generate mountains for a specific chunk (chunk-based, on-demand)
+func generate_mountains_for_chunk(chunk_data: Dictionary):
+	var chunk_key = chunk_data.key
+	
+	# Skip if already generated
+	if generated_chunks.has(chunk_key):
+		return
+	
+	# Mark as generated immediately to prevent duplicate calls
+	generated_chunks[chunk_key] = true
+	
+	# Get chunk bounds
+	var min_x = chunk_data.start_x
+	var max_x = chunk_data.end_x
+	var min_z = chunk_data.start_z
+	var max_z = chunk_data.end_z
+	
+	# Generate mountains synchronously for small chunks (fast, non-blocking for small areas)
+	_generate_mountains_for_chunk_sync(min_x, max_x, min_z, max_z, chunk_key)
+
+# Synchronous generation for a chunk (fast for small chunks)
+func _generate_mountains_for_chunk_sync(min_x: float, max_x: float, min_z: float, max_z: float, chunk_key: String):
 	var area = (max_x - min_x) * (max_z - min_z)
 	var count = int(area * MOUNTAIN_SPAWN_DENSITY)
 	
-	# Ensure minimum distance between mountains
+	# Limit count to prevent excessive generation
+	if count > 20:  # Cap at 20 mountains per chunk for performance
+		count = 20
+	
+	var spawned_positions = []
+	var mountains_spawned = 0
+	
+	for i in range(count):
+		var attempts = 0
+		var valid = false
+		var x = 0.0
+		var z = 0.0
+		
+		while attempts < 50 and not valid:
+			x = min_x + rng.randf() * (max_x - min_x)
+			z = min_z + rng.randf() * (max_z - min_z)
+			
+			valid = true
+			for pos in spawned_positions:
+				var dist = Vector2(x - pos.x, z - pos.y).length()
+				if dist < MOUNTAIN_MIN_DISTANCE:
+					valid = false
+					break
+			
+			attempts += 1
+		
+		if valid:
+			# Spawn without emitting signal (we'll emit once at the end)
+			_spawn_mountain_internal(x, z)
+			spawned_positions.append(Vector2(x, z))
+			mountains_spawned += 1
+	
+	# Emit signal once after all mountains are generated
+	if mountains_spawned > 0:
+		mountains_changed.emit()
+
+# Internal spawn function without signal emission (for batch operations)
+func _spawn_mountain_internal(world_x: float, world_z: float, biome_id: int = -1) -> int:
+	# Get biome if not provided
+	if biome_id == -1 and world_manager:
+		var biome = world_manager.get_biome_at(Vector3(world_x, 0, world_z))
+		biome_id = biome
+	
+	# Generate seed from position (using bitwise XOR equivalent)
+	var hash1 = int(world_x * 1103515245) & 0xFFFFFFFF
+	var hash2 = int(world_z * 2654435761) & 0xFFFFFFFF
+	var seed_val = (hash1 + hash2) & 0xFFFFFFFF  # Use addition instead of XOR for seed mixing
+	
+	# Get wind direction
+	var wind_dir = 0.0
+	if wind_manager:
+		var wind_vel = wind_manager.get_velocity()
+		wind_dir = atan2(wind_vel.y, wind_vel.x)
+	
+	# Generate mountain cluster
+	var cluster = MountainGenerator.build_mountain_cluster(seed_val, wind_dir)
+	
+	# Create mountain data
+	var mountain_id = next_mountain_id
+	next_mountain_id += 1
+	
+	var mountain_data = {
+		"id": mountain_id,
+		"x": world_x,
+		"z": world_z,
+		"r": cluster.envelope_r,
+		"cells": cluster.cells,
+		"tall": cluster.tall,
+		"biome_id": biome_id,
+		"seed": seed_val
+	}
+	
+	mountains[mountain_id] = mountain_data
+	
+	# Add to spatial hash
+	var chunk_x = int(world_x / 256.0)
+	var chunk_z = int(world_z / 256.0)
+	var chunk_key = "%d,%d" % [chunk_x, chunk_z]
+	if not mountain_chunks.has(chunk_key):
+		mountain_chunks[chunk_key] = []
+	mountain_chunks[chunk_key].append(mountain_id)
+	
+	# NOTE: No signal emission here - caller will emit after batch
+	return mountain_id
+
+# Generate mountains in an area (legacy method, kept for compatibility)
+func generate_mountains_in_area(min_x: float, max_x: float, min_z: float, max_z: float):
+	# Legacy method - generate synchronously (for backwards compatibility)
+	var area = (max_x - min_x) * (max_z - min_z)
+	var count = int(area * MOUNTAIN_SPAWN_DENSITY)
+	
 	var spawned_positions = []
 	
 	for i in range(count):
@@ -144,7 +257,7 @@ func generate_mountains_in_area(min_x: float, max_x: float, min_z: float, max_z:
 			
 			valid = true
 			for pos in spawned_positions:
-				var dist = Vector2(x - pos.x, z - pos.y).length()  # Vector2 uses x, y (z stored as y)
+				var dist = Vector2(x - pos.x, z - pos.y).length()
 				if dist < MOUNTAIN_MIN_DISTANCE:
 					valid = false
 					break
@@ -153,7 +266,7 @@ func generate_mountains_in_area(min_x: float, max_x: float, min_z: float, max_z:
 		
 		if valid:
 			spawn_mountain(x, z)
-			spawned_positions.append(Vector2(x, z))  # Vector2 uses x, y (z becomes y)
+			spawned_positions.append(Vector2(x, z))
 
 # Get all mountains in an area (for rendering)
 func get_mountains_in_area(min_x: float, max_x: float, min_z: float, max_z: float) -> Array:

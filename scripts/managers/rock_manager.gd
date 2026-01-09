@@ -31,6 +31,9 @@ var next_rock_id: int = 0
 # Spatial hash for quick lookups (chunk-based)
 var rock_chunks: Dictionary = {}  # "chunk_x,chunk_z" -> Array[rock_ids]
 
+# Track which chunks have been generated (to prevent duplicate generation)
+var generated_chunks: Dictionary = {}  # "chunk_x,chunk_z" -> bool
+
 var world_manager: Node = null
 var wind_manager: Node = null
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -136,12 +139,134 @@ func spawn_rock(world_x: float, world_z: float, variant: RockVariant = RockVaria
 	rocks_changed.emit()
 	return rock_id
 
-# Generate rocks in an area (for world generation)
-func generate_rocks_in_area(min_x: float, max_x: float, min_z: float, max_z: float):
+# Generate rocks for a specific chunk (chunk-based, on-demand)
+func generate_rocks_for_chunk(chunk_data: Dictionary):
+	var chunk_key = chunk_data.key
+	
+	# Skip if already generated
+	if generated_chunks.has(chunk_key):
+		return
+	
+	# Mark as generated immediately to prevent duplicate calls
+	generated_chunks[chunk_key] = true
+	
+	# Get chunk bounds
+	var min_x = chunk_data.start_x
+	var max_x = chunk_data.end_x
+	var min_z = chunk_data.start_z
+	var max_z = chunk_data.end_z
+	
+	# Generate rocks synchronously for small chunks (fast, non-blocking for small areas)
+	# Chunks are 64x64 tiles = 4096x4096 world units
+	# This is small enough to generate quickly without blocking
+	_generate_rocks_for_chunk_sync(min_x, max_x, min_z, max_z, chunk_key)
+
+# Synchronous generation for a chunk (fast for small chunks)
+func _generate_rocks_for_chunk_sync(min_x: float, max_x: float, min_z: float, max_z: float, chunk_key: String):
 	var area = (max_x - min_x) * (max_z - min_z)
 	var count = int(area * ROCK_SPAWN_DENSITY)
 	
+	# Limit count to prevent excessive generation
+	# For a 4096x4096 chunk, this is ~8,388 rocks max, but we'll cap it
+	if count > 100:  # Cap at 100 rocks per chunk for performance
+		count = 100
+	
 	# Ensure minimum distance between rocks
+	var spawned_positions = []
+	var rocks_spawned = 0
+	
+	# Temporarily disable signal emission during batch generation
+	for i in range(count):
+		var attempts = 0
+		var valid = false
+		var x = 0.0
+		var z = 0.0
+		
+		while attempts < 50 and not valid:
+			x = min_x + rng.randf() * (max_x - min_x)
+			z = min_z + rng.randf() * (max_z - min_z)
+			
+			valid = true
+			for pos in spawned_positions:
+				var dist = Vector2(x - pos.x, z - pos.y).length()
+				if dist < ROCK_MIN_DISTANCE:
+					valid = false
+					break
+			
+			attempts += 1
+		
+		if valid:
+			# Random variant (25% pebble, 63% boulder, 12% spire)
+			var roll = rng.randf()
+			var variant = RockVariant.PEBBLE if roll < 0.25 else (RockVariant.SPIRE if roll > 0.88 else RockVariant.BOULDER)
+			# Spawn without emitting signal (we'll emit once at the end)
+			_spawn_rock_internal(x, z, variant)
+			spawned_positions.append(Vector2(x, z))
+			rocks_spawned += 1
+	
+	# Emit signal once after all rocks are generated
+	if rocks_spawned > 0:
+		rocks_changed.emit()
+
+# Internal spawn function without signal emission (for batch operations)
+func _spawn_rock_internal(world_x: float, world_z: float, variant: RockVariant = RockVariant.BOULDER, biome_id: int = -1) -> int:
+	# Get biome if not provided
+	if biome_id == -1 and world_manager:
+		var biome = world_manager.get_biome_at(Vector3(world_x, 0, world_z))
+		biome_id = biome
+	
+	# Generate seed from position
+	var hash1 = int(world_x * 1103515245) & 0xFFFFFFFF
+	var hash2 = int(world_z * 2654435761) & 0xFFFFFFFF
+	var seed_val = (hash1 + hash2) & 0xFFFFFFFF
+	
+	# Get wind direction
+	var wind_dir = 0.0
+	if wind_manager:
+		var wind_vel = wind_manager.get_velocity()
+		wind_dir = atan2(wind_vel.y, wind_vel.x)
+	
+	# Convert variant enum to string
+	var variant_str = "pebble" if variant == RockVariant.PEBBLE else ("boulder" if variant == RockVariant.BOULDER else "spire")
+	
+	# Generate rock cluster
+	var cluster = RockGenerator.build_rock_cluster(variant_str, seed_val, wind_dir)
+	
+	# Create rock data
+	var rock_id = next_rock_id
+	next_rock_id += 1
+	
+	var rock_data = {
+		"id": rock_id,
+		"x": world_x,
+		"z": world_z,
+		"r": cluster.envelope_r,
+		"cells": cluster.cells,
+		"tall": cluster.tall,
+		"variant": variant,
+		"biome_id": biome_id,
+		"seed": seed_val
+	}
+	
+	rocks[rock_id] = rock_data
+	
+	# Add to spatial hash
+	var chunk_x = int(world_x / 256.0)
+	var chunk_z = int(world_z / 256.0)
+	var chunk_key = "%d,%d" % [chunk_x, chunk_z]
+	if not rock_chunks.has(chunk_key):
+		rock_chunks[chunk_key] = []
+	rock_chunks[chunk_key].append(rock_id)
+	
+	# NOTE: No signal emission here - caller will emit after batch
+	return rock_id
+
+# Generate rocks in an area (legacy method, kept for compatibility)
+func generate_rocks_in_area(min_x: float, max_x: float, min_z: float, max_z: float):
+	# Legacy method - generate synchronously (for backwards compatibility)
+	var area = (max_x - min_x) * (max_z - min_z)
+	var count = int(area * ROCK_SPAWN_DENSITY)
+	
 	var spawned_positions = []
 	
 	for i in range(count):
@@ -156,7 +281,7 @@ func generate_rocks_in_area(min_x: float, max_x: float, min_z: float, max_z: flo
 			
 			valid = true
 			for pos in spawned_positions:
-				var dist = Vector2(x - pos.x, z - pos.y).length()  # Vector2 uses x, y (z stored as y)
+				var dist = Vector2(x - pos.x, z - pos.y).length()
 				if dist < ROCK_MIN_DISTANCE:
 					valid = false
 					break
@@ -164,7 +289,6 @@ func generate_rocks_in_area(min_x: float, max_x: float, min_z: float, max_z: flo
 			attempts += 1
 		
 		if valid:
-			# Random variant (25% pebble, 63% boulder, 12% spire)
 			var roll = rng.randf()
 			var variant = RockVariant.PEBBLE if roll < 0.25 else (RockVariant.SPIRE if roll > 0.88 else RockVariant.BOULDER)
 			spawn_rock(x, z, variant)

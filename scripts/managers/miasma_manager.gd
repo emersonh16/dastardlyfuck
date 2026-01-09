@@ -33,11 +33,9 @@ var game_time: float = 0.0
 # Wind manager reference
 var wind_manager: Node = null
 
-# Mountain manager reference (for blocking checks)
-var mountain_manager: Node = null
-
-# Rock manager reference (for blocking checks)
-var rock_manager: Node = null
+# DISABLED: Rock/mountain managers removed for performance
+# var mountain_manager: Node = null
+# var rock_manager: Node = null
 
 # Regrowth settings (match reference implementation)
 # Key: Only boundary tiles regrow, creating gradual creep-in from edges
@@ -68,8 +66,9 @@ func _ready():
 	wind_manager = get_node_or_null("/root/WindManager")
 	if wind_manager:
 		wind_manager.wind_changed.connect(_on_wind_changed)
-	mountain_manager = get_node_or_null("/root/MountainManager")
-	rock_manager = get_node_or_null("/root/RockManager")
+	# DISABLED: Rock/mountain managers removed for performance
+	# mountain_manager = get_node_or_null("/root/MountainManager")
+	# rock_manager = get_node_or_null("/root/RockManager")
 	call_deferred("_initialize_default")
 
 func _process(delta):
@@ -168,13 +167,13 @@ func clear_area(world_pos: Vector3, radius: float) -> int:
 			var dist_sq = dxw * dxw + dzw * dzw
 			
 			if dist_sq <= radius_sq:
-				# Check if blocked by mountains or tall rocks (tall cells block miasma)
+				# DISABLED: Rock/mountain blocking disabled for performance
 				var tile_world_pos = Vector3(tile_center_x, 0, tile_center_z)
-				var is_blocked = false
-				if mountain_manager and mountain_manager.has_method("is_miasma_blocked_at"):
-					is_blocked = mountain_manager.is_miasma_blocked_at(tile_world_pos)
-				if not is_blocked and rock_manager and rock_manager.has_method("is_miasma_blocked_at"):
-					is_blocked = rock_manager.is_miasma_blocked_at(tile_world_pos)
+				var is_blocked = false  # Always false - no blocking
+				# if mountain_manager and mountain_manager.has_method("is_miasma_blocked_at"):
+				# 	is_blocked = mountain_manager.is_miasma_blocked_at(tile_world_pos)
+				# if not is_blocked and rock_manager and rock_manager.has_method("is_miasma_blocked_at"):
+				# 	is_blocked = rock_manager.is_miasma_blocked_at(tile_world_pos)
 				
 				# Only clear if not blocked and not already cleared
 				if not is_blocked:

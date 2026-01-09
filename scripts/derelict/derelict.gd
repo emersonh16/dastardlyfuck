@@ -115,3 +115,8 @@ func _physics_process(_delta):
 	var manager = get_node_or_null("/root/MiasmaManager")
 	if manager:
 		manager.update_player_position(world_position)
+	
+	# Update WorldManager to load chunks around player
+	var world_manager = get_node_or_null("/root/WorldManager")
+	if world_manager:
+		world_manager.load_chunks_around_position(world_position)
