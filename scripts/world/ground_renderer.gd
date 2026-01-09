@@ -15,6 +15,7 @@ var brown_material: StandardMaterial3D = null
 var miasma_manager: Node = null
 var world_manager: Node = null
 var _last_visible_bounds: Dictionary = {}
+var _last_tile_bounds: Dictionary = {}
 
 func _ready():
 	await get_tree().process_frame
@@ -116,20 +117,26 @@ func _update_ground_tiles():
 		min_z -= padding
 		max_z += padding
 	
-	# Check if bounds changed (only rebuild if needed)
-	var current_bounds = {"min_x": min_x, "max_x": max_x, "min_z": min_z, "max_z": max_z}
-	if current_bounds.hash() == _last_visible_bounds.hash():
-		# Just update position, don't rebuild mesh
-		global_position = player_ground
-		return
-	
-	_last_visible_bounds = current_bounds
-	
 	# Calculate tile bounds (snap to grid)
 	var min_tile_x = int(min_x / GROUND_TILE_SIZE)
 	var max_tile_x = int(max_x / GROUND_TILE_SIZE) + 1
 	var min_tile_z = int(min_z / GROUND_TILE_SIZE)
 	var max_tile_z = int(max_z / GROUND_TILE_SIZE) + 1
+
+	# Check if tile bounds changed (only rebuild if needed)
+	var current_tile_bounds = {
+		"min_tile_x": min_tile_x,
+		"max_tile_x": max_tile_x,
+		"min_tile_z": min_tile_z,
+		"max_tile_z": max_tile_z
+	}
+	if current_tile_bounds.hash() == _last_tile_bounds.hash():
+		# Just update position, don't rebuild mesh
+		global_position = player_ground
+		return
+	
+	_last_visible_bounds = {"min_x": min_x, "max_x": max_x, "min_z": min_z, "max_z": max_z}
+	_last_tile_bounds = current_tile_bounds
 	
 	# Build mesh: tiles with borders (multiple surfaces: biome-colored centers, brown borders)
 	# We'll use a single material per tile center (or group by color for efficiency)
